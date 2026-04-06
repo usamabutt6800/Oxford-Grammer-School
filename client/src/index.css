@@ -1,0 +1,121 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    font-family: 'Inter', sans-serif;
+    @apply text-gray-800 bg-gray-50;
+  }
+}
+
+@layer components {
+  /* Buttons */
+  .btn-primary {
+    @apply bg-school-blue text-white px-6 py-3 rounded-lg font-medium 
+           hover:bg-blue-700 transition-colors focus:outline-none 
+           focus:ring-2 focus:ring-school-blue focus:ring-opacity-50 
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-secondary {
+    @apply bg-white text-school-blue border border-school-blue px-6 py-3 rounded-lg 
+           font-medium hover:bg-gray-50 transition-colors focus:outline-none 
+           focus:ring-2 focus:ring-school-blue focus:ring-opacity-50;
+  }
+
+  .btn-danger {
+    @apply bg-red-600 text-white px-6 py-3 rounded-lg font-medium 
+           hover:bg-red-700 transition-colors focus:outline-none 
+           focus:ring-2 focus:ring-red-600 focus:ring-opacity-50;
+  }
+
+  /* Cards */
+  .card {
+    @apply bg-white rounded-xl shadow-md p-6 border border-gray-200;
+  }
+
+  /* Inputs */
+  .input-field {
+    @apply w-full px-4 py-3 border border-gray-300 rounded-lg 
+           focus:outline-none focus:ring-2 focus:ring-school-blue 
+           focus:border-transparent transition-colors;
+  }
+
+  /* Tables */
+  .table-header {
+    @apply px-4 py-3 text-left font-semibold text-gray-700 bg-gray-50;
+  }
+
+  .table-cell {
+    @apply px-4 py-3 border-b border-gray-200;
+  }
+
+  /* Badges */
+  .badge {
+    @apply px-3 py-1 rounded-full text-sm font-medium;
+  }
+
+  .badge-success {
+    @apply bg-green-100 text-green-800;
+  }
+
+  .badge-warning {
+    @apply bg-yellow-100 text-yellow-800;
+  }
+
+  .badge-danger {
+    @apply bg-red-100 text-red-800;
+  }
+
+  .badge-info {
+    @apply bg-blue-100 text-blue-800;
+  }
+}
+
+/* School Colors */
+:root {
+  --school-blue: #1e40af;
+  --school-gold: #d97706;
+  --school-navy: #1e3a8a;
+}
+
+.text-school-blue {
+  color: #1e40af;
+}
+
+.bg-school-blue {
+  background-color: #1e40af;
+}
+
+.text-school-gold {
+  color: #d97706;
+}
+
+.bg-school-gold {
+  background-color: #d97706;
+}
+
+.text-school-navy {
+  color: #1e3a8a;
+}
+
+.bg-school-navy {
+  background-color: #1e3a8a;
+}
+
+/* Modal Styles */
+.modal-overlay {
+  @apply fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50;
+}
+
+.modal-content {
+  @apply bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto;
+}
+
+/* Loading Spinner */
+.spinner {
+  @apply animate-spin rounded-full border-4 border-gray-200 border-t-blue-600;
+}
