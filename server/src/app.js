@@ -40,19 +40,27 @@ const allowedOrigins = [
 // Handle preflight requests for all routes
 app.options('*', cors());
 
+// Enable CORS - Allow all Vercel domains and localhost
 app.use(cors({
   origin: function(origin, callback) {
     // Allow requests with no origin (like mobile apps or curl)
-    if (!origin) return callback(null, true);
-    
-    // Check if origin is allowed (exact match or ends with .vercel.app)
-    if (allowedOrigins.includes(origin) || origin.endsWith('.vercel.app')) {
-      callback(null, true);
-    } else {
-      console.log('CORS blocked origin:', origin);
-      // Still allow for now to avoid breaking
-      callback(null, true);
+    if (!origin) {
+      return callback(null, true);
     }
+    
+    // Allow localhost for development
+    if (origin.includes('localhost')) {
+      return callback(null, true);
+    }
+    
+    // Allow ALL Vercel domains (production and preview)
+    if (origin.includes('.vercel.app')) {
+      return callback(null, true);
+    }
+    
+    // If none of the above, block the request
+    console.log('CORS blocked origin:', origin);
+    return callback(new Error('CORS policy violation'), false);
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
