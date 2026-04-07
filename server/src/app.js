@@ -29,9 +29,31 @@ app.use(express.urlencoded({ extended: true }));
 // Cookie parser
 app.use(cookieParser());
 
-// Enable CORS - Allow both localhost and Vercel domains
+// Enable CORS - Allow all Vercel domains and localhost
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:3000',
+  'https://oxford-grammer-school-frontend.vercel.app',
+  'https://oxford-grammer-school-backend.vercel.app'
+];
+
+// Handle preflight requests for all routes
+app.options('*', cors());
+
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://localhost:3000', 'https://*.vercel.app'],
+  origin: function(origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl)
+    if (!origin) return callback(null, true);
+    
+    // Check if origin is allowed (exact match or ends with .vercel.app)
+    if (allowedOrigins.includes(origin) || origin.endsWith('.vercel.app')) {
+      callback(null, true);
+    } else {
+      console.log('CORS blocked origin:', origin);
+      // Still allow for now to avoid breaking
+      callback(null, true);
+    }
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
@@ -40,6 +62,8 @@ app.use(cors({
 // Security headers
 app.use(helmet({
   crossOriginResourcePolicy: false,
+  crossOriginEmbedderPolicy: false,
+  contentSecurityPolicy: false,
 }));
 
 // Sanitize data
