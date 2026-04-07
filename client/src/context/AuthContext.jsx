@@ -23,7 +23,7 @@ export const AuthProvider = ({ children }) => {
     },
   });
 
-  // Request interceptor
+  // Request interceptor - ADD TOKEN TO EVERY REQUEST
   api.interceptors.request.use(
     (config) => {
       const token = localStorage.getItem('token');
@@ -35,7 +35,7 @@ export const AuthProvider = ({ children }) => {
     (error) => Promise.reject(error)
   );
 
-  // Response interceptor
+  // Response interceptor - Handle 401
   api.interceptors.response.use(
     (response) => response,
     (error) => {
@@ -52,11 +52,17 @@ export const AuthProvider = ({ children }) => {
 
   // Check auth on mount
   useEffect(() => {
-    checkAuth();
+    const token = localStorage.getItem('token');
+    if (token) {
+      checkAuth();
+    } else {
+      setLoading(false);
+    }
   }, []);
 
   const checkAuth = async () => {
     const token = localStorage.getItem('token');
+    
     if (!token) {
       setLoading(false);
       return;
@@ -64,6 +70,7 @@ export const AuthProvider = ({ children }) => {
     
     try {
       const response = await api.get('/auth/me');
+      
       if (response.data?.success) {
         setUser(response.data.data);
       } else {
@@ -82,6 +89,7 @@ export const AuthProvider = ({ children }) => {
   const login = async (email, password) => {
     try {
       setError(null);
+      
       const response = await api.post('/auth/login', { email, password });
       
       if (response.data?.success) {
