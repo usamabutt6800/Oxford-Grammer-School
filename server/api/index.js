@@ -2,11 +2,7 @@
 import app from '../src/app.js';
 
 export default async function handler(req, res) {
-    // Vercel adds /api prefix, we need to remove it for routes to work
-    if (req.url && req.url.startsWith('/api')) {
-        req.url = req.url.replace('/api', '');
-    }
-    
-    // Forward the request to your Express app
+    // Pass the request directly to Express
+    // Vercel and Express both understand /api/v1/ routes
     await app(req, res);
 }
