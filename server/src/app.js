@@ -3,7 +3,6 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import mongoSanitize from 'express-mongo-sanitize';
-import rateLimit from 'express-rate-limit';
 import errorHandler from './middlewares/errorHandler.js';
 import { apiLimiter } from './middlewares/auth.js';
 
@@ -21,7 +20,6 @@ import paymentRoutes from './modules/payments/routes/paymentRoutes.js';
 import canteenRoutes from './modules/canteen/routes/canteenRoutes.js';
 import inventoryRoutes from './modules/inventory/routes/inventoryRoutes.js';
 
-
 const app = express();
 
 // Body parser
@@ -31,17 +29,17 @@ app.use(express.urlencoded({ extended: true }));
 // Cookie parser
 app.use(cookieParser());
 
-// Enable CORS - Allow all origins in development
+// Enable CORS - Allow both localhost and Vercel domains
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://localhost:3000'],
+  origin: ['http://localhost:5173', 'http://localhost:3000', 'https://*.vercel.app'],
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-// Set security headers
+// Security headers
 app.use(helmet({
-  crossOriginResourcePolicy: false, // Allow images and resources from other domains
+  crossOriginResourcePolicy: false,
 }));
 
 // Sanitize data
@@ -69,19 +67,20 @@ app.get('/health', (req, res) => {
   res.status(200).json({
     success: true,
     message: 'Oxford Grammar School API is running',
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development'
   });
 });
 
-// Error handler
-app.use(errorHandler);
-
-// 404 handler
-app.use('*', (req, res) => {
+// 404 handler for API routes
+app.use('/api/*', (req, res) => {
   res.status(404).json({
     success: false,
-    error: 'Route not found'
+    error: `API endpoint not found: ${req.method} ${req.path}`
   });
 });
+
+// Error handler (should be last)
+app.use(errorHandler);
 
 export default app;
