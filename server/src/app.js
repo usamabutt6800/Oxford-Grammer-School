@@ -45,6 +45,21 @@ app.use(helmet({
 // Sanitize data
 app.use(mongoSanitize());
 
+// Root route for testing
+app.get('/', (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: 'Oxford Grammar School API is running',
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development',
+    endpoints: {
+      health: '/health',
+      auth: '/api/v1/auth/login',
+      students: '/api/v1/students'
+    }
+  });
+});
+
 // Rate limiting for API
 app.use('/api', apiLimiter);
 
