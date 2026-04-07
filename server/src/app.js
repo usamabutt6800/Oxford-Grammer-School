@@ -1,5 +1,4 @@
 import express from 'express';
-import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import mongoSanitize from 'express-mongo-sanitize';
@@ -23,61 +22,47 @@ import inventoryRoutes from './modules/inventory/routes/inventoryRoutes.js';
 const app = express();
 
 // Body parser
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Cookie parser
 app.use(cookieParser());
 
-// Enable CORS - Allow all Vercel domains and localhost
-const allowedOrigins = [
-  'http://localhost:5173',
-  'http://localhost:3000',
-  'https://oxford-grammer-school-frontend.vercel.app',
-  'https://oxford-grammer-school-backend.vercel.app'
-];
+// ========== CORS CONFIGURATION - FINAL WORKING VERSION ==========
+// Handle preflight requests for all routes FIRST
+app.options('*', (req, res) => {
+  const origin = req.headers.origin;
+  if (origin && (origin.includes('localhost') || origin.includes('vercel.app'))) {
+    res.header('Access-Control-Allow-Origin', origin);
+  }
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.sendStatus(200);
+});
 
-// Handle preflight requests for all routes
-app.options('*', cors());
+// CORS middleware
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin && (origin.includes('localhost') || origin.includes('vercel.app'))) {
+    res.header('Access-Control-Allow-Origin', origin);
+  }
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
+});
 
-// Enable CORS - Allow all Vercel domains and localhost
-app.use(cors({
-  origin: function(origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl)
-    if (!origin) {
-      return callback(null, true);
-    }
-    
-    // Allow localhost for development
-    if (origin.includes('localhost')) {
-      return callback(null, true);
-    }
-    
-    // Allow ALL Vercel domains (production and preview)
-    if (origin.includes('.vercel.app')) {
-      return callback(null, true);
-    }
-    
-    // If none of the above, block the request
-    console.log('CORS blocked origin:', origin);
-    return callback(new Error('CORS policy violation'), false);
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
-
-// Security headers
+// Security headers (relaxed for Vercel)
 app.use(helmet({
   crossOriginResourcePolicy: false,
   crossOriginEmbedderPolicy: false,
   contentSecurityPolicy: false,
 }));
-// Log all incoming requests for debugging
-app.use((req, res, next) => {
-    console.log(`${req.method} ${req.url}`);
-    next();
-});
 
 // Sanitize data
 app.use(mongoSanitize());
