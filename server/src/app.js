@@ -3,6 +3,7 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import mongoSanitize from 'express-mongo-sanitize';
+import rateLimit from 'express-rate-limit';
 import errorHandler from './middlewares/errorHandler.js';
 import { apiLimiter } from './middlewares/auth.js';
 
@@ -20,6 +21,7 @@ import paymentRoutes from './modules/payments/routes/paymentRoutes.js';
 import canteenRoutes from './modules/canteen/routes/canteenRoutes.js';
 import inventoryRoutes from './modules/inventory/routes/inventoryRoutes.js';
 
+
 const app = express();
 
 // Body parser
@@ -29,17 +31,17 @@ app.use(express.urlencoded({ extended: true }));
 // Cookie parser
 app.use(cookieParser());
 
-// Enable CORS for local development
+// Enable CORS - Allow all origins in development
 app.use(cors({
   origin: ['http://localhost:5173', 'http://localhost:3000'],
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-// Security headers (relaxed for development)
+// Set security headers
 app.use(helmet({
-  crossOriginResourcePolicy: false,
+  crossOriginResourcePolicy: false, // Allow images and resources from other domains
 }));
 
 // Sanitize data
@@ -71,15 +73,15 @@ app.get('/health', (req, res) => {
   });
 });
 
+// Error handler
+app.use(errorHandler);
+
 // 404 handler
 app.use('*', (req, res) => {
   res.status(404).json({
     success: false,
-    error: `Route not found: ${req.method} ${req.path}`
+    error: 'Route not found'
   });
 });
-
-// Error handler (should be last)
-app.use(errorHandler);
 
 export default app;
