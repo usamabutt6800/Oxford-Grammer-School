@@ -1,4 +1,4 @@
-
+// client/src/services/teacherDashboardService.js
 import api from './api';
 
 export const teacherDashboardService = {
@@ -40,7 +40,7 @@ export const teacherDashboardService = {
     }
   },
 
-  // Get class attendance
+  // Get class attendance for a given date
   getClassAttendance: async (date, className, section) => {
     try {
       const response = await api.get('/teachers/me/attendance', {
@@ -73,5 +73,32 @@ export const teacherDashboardService = {
       console.error('Error in getDashboardStats:', error);
       throw error;
     }
-  }
+  },
+
+  // Check if attendance is already marked/approved for a given date + class
+  // Used by teacher attendance page to show correct state (mark / update / view)
+  checkTodayAttendance: async (date, className, section) => {
+    try {
+      const response = await api.get('/teachers/me/attendance/check', {
+        params: { date, class: className, section }
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Error in checkTodayAttendance:', error);
+      throw error;
+    }
+  },
+
+  // Get attendance report for a date range (for printing / export)
+  getAttendanceReport: async (startDate, endDate, className, section) => {
+    try {
+      const response = await api.get('/teachers/me/attendance/report', {
+        params: { startDate, endDate, class: className, section }
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Error in getAttendanceReport:', error);
+      throw error;
+    }
+  },
 };
