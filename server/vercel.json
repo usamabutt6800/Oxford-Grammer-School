@@ -4,17 +4,9 @@
     {
       "src": "api/index.js",
       "use": "@vercel/node"
-    },
-    {
-      "src": "api/login.js",
-      "use": "@vercel/node"
     }
   ],
   "routes": [
-    {
-      "src": "/api/v1/auth/login",
-      "dest": "/api/login.js"
-    },
     {
       "src": "/(.*)",
       "dest": "/api/index.js"

@@ -1,3 +1,4 @@
+// client/src/services/api.js
 import axios from 'axios';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1';
@@ -5,13 +6,14 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1';
 // Create axios instance
 const api = axios.create({
   baseURL: API_URL,
-  withCredentials: true,
+  // withCredentials removed — we use Bearer tokens in Authorization header,
+  // NOT cookies. withCredentials:true causes CORS preflight failures on Vercel.
   headers: {
     'Content-Type': 'application/json',
   },
 });
 
-// Request interceptor to add token
+// Request interceptor — attach token to every request
 api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('token');
@@ -20,12 +22,10 @@ api.interceptors.request.use(
     }
     return config;
   },
-  (error) => {
-    return Promise.reject(error);
-  }
+  (error) => Promise.reject(error)
 );
 
-// Response interceptor for handling errors
+// Response interceptor — only redirect to login on 401
 api.interceptors.response.use(
   (response) => response,
   (error) => {
@@ -39,7 +39,7 @@ api.interceptors.response.use(
 
 export default api;
 
-// Generic CRUD functions
+// Generic CRUD helpers
 export const createEntity = async (endpoint, data) => {
   const response = await api.post(endpoint, data);
   return response.data;

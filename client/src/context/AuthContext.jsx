@@ -16,10 +16,12 @@ export const AuthProvider = ({ children }) => {
 
   const api = axios.create({
     baseURL: API_URL,
-    withCredentials: true,
+    // withCredentials removed — Bearer token approach doesn't need cookies.
+    // Keeping withCredentials:true with a wildcard CORS origin causes browser blocks.
     headers: { 'Content-Type': 'application/json' },
   });
 
+  // Attach token to every request from AuthContext's axios instance too
   api.interceptors.request.use((config) => {
     const token = localStorage.getItem('token');
     if (token) {
@@ -28,13 +30,12 @@ export const AuthProvider = ({ children }) => {
     return config;
   });
 
-  // Only logout on 401 from /auth/me endpoint
+  // Only clear auth and redirect when /auth/me itself returns 401
   api.interceptors.response.use(
     (response) => response,
     (error) => {
       const url = error.config?.url || '';
       const isMeEndpoint = url.includes('/auth/me');
-      
       if (error.response?.status === 401 && isMeEndpoint) {
         localStorage.removeItem('token');
         setUser(null);
@@ -59,17 +60,19 @@ export const AuthProvider = ({ children }) => {
       setLoading(false);
       return;
     }
-    
+
     try {
       const response = await api.get('/auth/me');
       if (response.data?.success) {
         setUser(response.data.data);
       } else {
         localStorage.removeItem('token');
+        setUser(null);
       }
     } catch (error) {
       console.error('Auth check error:', error);
       localStorage.removeItem('token');
+      setUser(null);
     } finally {
       setLoading(false);
     }
@@ -79,7 +82,7 @@ export const AuthProvider = ({ children }) => {
     try {
       setError(null);
       const response = await api.post('/auth/login', { email, password });
-      
+
       if (response.data?.success) {
         const userData = response.data.data;
         localStorage.setItem('token', userData.token);
@@ -96,7 +99,7 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const logout = async () => {
+  const logout = () => {
     setUser(null);
     localStorage.removeItem('token');
     window.location.href = '/login';
@@ -105,9 +108,7 @@ export const AuthProvider = ({ children }) => {
   const getApi = () => api;
 
   return (
-    <AuthContext.Provider value={{ 
-      user, loading, error, login, logout, checkAuth, API_URL, api: getApi 
-    }}>
+    <AuthContext.Provider value={{ user, loading, error, login, logout, checkAuth, API_URL, api: getApi }}>
       {children}
     </AuthContext.Provider>
   );
