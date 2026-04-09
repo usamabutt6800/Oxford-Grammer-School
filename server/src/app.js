@@ -6,9 +6,8 @@ import helmet from 'helmet';
 import mongoSanitize from 'express-mongo-sanitize';
 import mongoose from 'mongoose';
 import errorHandler from './middlewares/errorHandler.js';
-import { protect, apiLimiter } from './middlewares/auth.js';
+import { protect, apiLimiter, loginLimiter } from './middlewares/auth.js';
 
-// Import routes
 import authRoutes from './modules/auth/routes/authRoutes.js';
 import userRoutes from './modules/users/routes/userRoutes.js';
 import studentRoutes from './modules/students/routes/studentRoutes.js';
@@ -25,32 +24,25 @@ import inventoryRoutes from './modules/inventory/routes/inventoryRoutes.js';
 const app = express();
 
 // ========== CORS ==========
-// Must be FIRST middleware — before everything else including helmet
 const allowedOrigins = [
   'http://localhost:5173',
   'http://localhost:3000',
   'https://oxford-grammer-school-frontend.vercel.app',
-  // Add any other Vercel preview URLs for your frontend here
 ];
 
 app.use(cors({
   origin: (origin, callback) => {
-    // Allow requests with no origin (mobile apps, curl, Postman)
     if (!origin) return callback(null, true);
-    if (
-      allowedOrigins.includes(origin) ||
-      origin.endsWith('.vercel.app') // allows all Vercel preview deployments
-    ) {
+    if (allowedOrigins.includes(origin) || origin.endsWith('.vercel.app')) {
       return callback(null, true);
     }
     return callback(new Error(`CORS blocked: ${origin}`));
   },
-  credentials: false, // We use Bearer tokens in headers, NOT cookies — so this must be false
+  credentials: false,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 
-// Handle preflight requests for all routes
 app.options('*', cors());
 
 // ========== SECURITY ==========
@@ -64,9 +56,11 @@ app.use(helmet({
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cookieParser());
-
-// ========== SANITIZE ==========
 app.use(mongoSanitize());
+
+// ========== RATE LIMITING ==========
+// Must be BEFORE all route handlers so nothing bypasses it
+app.use('/api', apiLimiter);
 
 // ========== HEALTH & ROOT ==========
 app.get('/', (req, res) => {
@@ -83,7 +77,7 @@ app.get('/health', (req, res) => {
     success: true,
     message: 'Server is healthy',
     timestamp: new Date().toISOString(),
-    dbState: mongoose.connection.readyState, // 1 = connected
+    dbState: mongoose.connection.readyState,
   });
 });
 
@@ -91,16 +85,17 @@ app.get('/health', (req, res) => {
 app.get('/api/v1/students/stats/summary', protect, async (req, res) => {
   try {
     const Student = mongoose.model('Student');
-    const total = await Student.countDocuments();
-    const active = await Student.countDocuments({ status: 'Active' });
-    const currentMonth = new Date().getMonth();
-    const currentYear = new Date().getFullYear();
-    const newThisMonth = await Student.countDocuments({
-      createdAt: {
-        $gte: new Date(currentYear, currentMonth, 1),
-        $lt: new Date(currentYear, currentMonth + 1, 1),
-      },
-    });
+    const now = new Date();
+    const [total, active, newThisMonth] = await Promise.all([
+      Student.countDocuments(),
+      Student.countDocuments({ status: 'Active' }),
+      Student.countDocuments({
+        createdAt: {
+          $gte: new Date(now.getFullYear(), now.getMonth(), 1),
+          $lt: new Date(now.getFullYear(), now.getMonth() + 1, 1),
+        },
+      }),
+    ]);
     res.json({ success: true, data: { summary: { total, active, newThisMonth } } });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -110,8 +105,10 @@ app.get('/api/v1/students/stats/summary', protect, async (req, res) => {
 app.get('/api/v1/teachers/stats', protect, async (req, res) => {
   try {
     const Teacher = mongoose.model('Teacher');
-    const total = await Teacher.countDocuments();
-    const active = await Teacher.countDocuments({ status: 'Active' });
+    const [total, active] = await Promise.all([
+      Teacher.countDocuments(),
+      Teacher.countDocuments({ status: 'Active' }),
+    ]);
     res.json({ success: true, data: { total, active, newThisMonth: 0 } });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -124,28 +121,27 @@ app.get('/api/v1/attendance/stats', protect, async (req, res) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const todayAttendance = await Attendance.find({
-      date: { $gte: today, $lt: new Date(today.getTime() + 24 * 60 * 60 * 1000) },
+      date: { $gte: today, $lt: new Date(today.getTime() + 86400000) },
       approvalStatus: 'Approved',
     });
+    const present = todayAttendance.filter((a) => a.status === 'Present').length;
+    const absent  = todayAttendance.filter((a) => a.status === 'Absent').length;
+    const leave   = todayAttendance.filter((a) => a.status === 'Leave').length;
+    const total   = present + absent + leave;
     res.json({
       success: true,
       data: {
         today: {
-          percentage: todayAttendance.length > 0 ? 85 : 0,
-          present: todayAttendance.filter((a) => a.status === 'Present').length,
-          absent: todayAttendance.filter((a) => a.status === 'Absent').length,
-          leave: todayAttendance.filter((a) => a.status === 'Leave').length,
+          percentage: total > 0 ? Math.round((present / total) * 100) : 0,
+          present, absent, leave,
         },
-        month: { percentage: 82 },
+        month: { percentage: 0 },
       },
     });
   } catch (error) {
     res.json({
       success: true,
-      data: {
-        today: { percentage: 85, present: 0, absent: 0, leave: 0 },
-        month: { percentage: 82 },
-      },
+      data: { today: { percentage: 0, present: 0, absent: 0, leave: 0 }, month: { percentage: 0 } },
     });
   }
 });
@@ -156,15 +152,16 @@ app.get('/api/v1/fees/stats/summary', protect, async (req, res) => {
     const result = await Fee.aggregate([
       { $group: { _id: null, totalPaid: { $sum: '$paidAmount' }, totalDue: { $sum: '$dueAmount' } } },
     ]);
+    const totalPaid = result[0]?.totalPaid || 0;
+    const totalDue  = result[0]?.totalDue  || 0;
     res.json({
       success: true,
       data: {
-        totalPaid: result[0]?.totalPaid || 0,
-        totalDue: result[0]?.totalDue || 0,
-        collectionRate:
-          result[0]?.totalPaid && result[0]?.totalDue
-            ? ((result[0].totalPaid / (result[0].totalPaid + result[0].totalDue)) * 100).toFixed(2)
-            : 0,
+        totalPaid,
+        totalDue,
+        collectionRate: totalPaid > 0
+          ? ((totalPaid / (totalPaid + totalDue)) * 100).toFixed(2)
+          : 0,
       },
     });
   } catch (error) {
@@ -172,11 +169,9 @@ app.get('/api/v1/fees/stats/summary', protect, async (req, res) => {
   }
 });
 
-// ========== RATE LIMITING ==========
-app.use('/api', apiLimiter);
-
 // ========== API ROUTES ==========
-app.use('/api/v1/auth', authRoutes);
+// loginLimiter applied only to auth routes (stricter: 10 attempts per 15 min)
+app.use('/api/v1/auth', loginLimiter, authRoutes);
 app.use('/api/v1/users', userRoutes);
 app.use('/api/v1/students', studentRoutes);
 app.use('/api/v1/fee-structure', feeStructureRoutes);
@@ -197,7 +192,6 @@ app.use('/api/*', (req, res) => {
   });
 });
 
-// ========== ERROR HANDLER ==========
 app.use(errorHandler);
 
 export default app;

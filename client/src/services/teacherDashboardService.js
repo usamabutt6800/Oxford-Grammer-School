@@ -89,6 +89,28 @@ export const teacherDashboardService = {
     }
   },
 
+  // Get pending attendance records (used by admin view inside teacher attendance page)
+  getPendingAttendance: async () => {
+    try {
+      const response = await api.get('/attendance/pending');
+      return response.data;
+    } catch (error) {
+      console.error('Error in getPendingAttendance:', error);
+      throw error;
+    }
+  },
+
+  // Approve a single attendance record (admin action)
+  approveAttendance: async (attendanceId) => {
+    try {
+      const response = await api.patch(`/attendance/${attendanceId}/approve`);
+      return response.data;
+    } catch (error) {
+      console.error('Error in approveAttendance:', error);
+      throw error;
+    }
+  },
+
   // Get attendance report for a date range (for printing / export)
   getAttendanceReport: async (startDate, endDate, className, section) => {
     try {

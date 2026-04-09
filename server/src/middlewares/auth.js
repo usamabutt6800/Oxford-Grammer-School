@@ -1,16 +1,15 @@
+// server/src/middlewares/auth.js
 import jwt from 'jsonwebtoken';
+import rateLimit from 'express-rate-limit';
 import User from '../modules/users/models/User.js';
 import asyncHandler from './asyncHandler.js';
-
-// In server/src/middlewares/auth.js, the protect middleware:
 
 export const protect = asyncHandler(async (req, res, next) => {
   let token;
 
-  // Get token from header or cookie
   if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
     token = req.headers.authorization.split(' ')[1];
-  } else if (req.cookies.token) {
+  } else if (req.cookies?.token) {
     token = req.cookies.token;
   }
 
@@ -22,28 +21,17 @@ export const protect = asyncHandler(async (req, res, next) => {
   }
 
   try {
-    // Verify token
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    
-    // Get user from database
-    req.user = await User.findById(decoded.id).select('-password'); // ← IMPORTANT
-    
+    req.user = await User.findById(decoded.id).select('-password');
+
     if (!req.user) {
-      return res.status(401).json({
-        success: false,
-        error: 'User not found'
-      });
+      return res.status(401).json({ success: false, error: 'User not found' });
     }
-    
-  
-    // Check if user is active
+
     if (!req.user.isActive) {
-      return res.status(401).json({
-        success: false,
-        error: 'User account is deactivated'
-      });
+      return res.status(401).json({ success: false, error: 'User account is deactivated' });
     }
-    
+
     next();
   } catch (error) {
     return res.status(401).json({
@@ -55,34 +43,23 @@ export const protect = asyncHandler(async (req, res, next) => {
 
 export const authorize = (...roles) => {
   return (req, res, next) => {
-    console.log('=== AUTHORIZE MIDDLEWARE ===');
-    console.log('Request user:', req.user);
-    console.log('Required roles:', roles);
-    console.log('User role:', req.user?.role);
     if (!req.user) {
-      return res.status(401).json({
-        success: false,
-        error: 'User not authenticated'
-      });
+      return res.status(401).json({ success: false, error: 'User not authenticated' });
     }
-    
     if (!roles.includes(req.user.role)) {
       return res.status(403).json({
         success: false,
-        error: `User role ${req.user.role} is not authorized to access this route`
+        error: `Role '${req.user.role}' is not authorized to access this route`
       });
     }
-    
     next();
   };
 };
 
-// Rate limiting middleware
-import rateLimit from 'express-rate-limit';
-
+// Applied on the login route — blocks brute-force attacks
 export const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 20, // 5 attempts
+  max: 10, // 10 attempts per window (was 20, reduced for security)
   message: {
     success: false,
     error: 'Too many login attempts, please try again after 15 minutes'
@@ -92,8 +69,8 @@ export const loginLimiter = rateLimit({
 });
 
 export const apiLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 500, // 100 requests per window
+  windowMs: 15 * 60 * 1000,
+  max: 500,
   message: {
     success: false,
     error: 'Too many requests, please try again later'
