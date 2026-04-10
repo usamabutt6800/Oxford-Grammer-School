@@ -1,4 +1,4 @@
-
+// server/src/modules/fees/models/FeeStructure.js
 import mongoose from 'mongoose';
 
 const classLevels = ['Play Group', 'Nursery', 'Prep', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10'];
@@ -8,7 +8,7 @@ const feeStructureSchema = new mongoose.Schema({
     type: String,
     enum: classLevels,
     required: true,
-    unique: true
+    // unique: true  <-- REMOVED: was blocking fee updates for new academic years
   },
   tuitionFee: {
     type: Number,
@@ -59,6 +59,9 @@ const feeStructureSchema = new mongoose.Schema({
 feeStructureSchema.virtual('totalFee').get(function() {
   return this.tuitionFee + this.admissionFee + this.examFee + this.otherCharges;
 });
+
+// One fee structure per class per academic year
+feeStructureSchema.index({ class: 1, academicYear: 1 }, { unique: true });
 
 const FeeStructure = mongoose.model('FeeStructure', feeStructureSchema);
 export default FeeStructure;

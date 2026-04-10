@@ -1,3 +1,7 @@
+// server/src/modules/auth/routes/authRoutes.js
+// loginLimiter is already applied in app.js on all /api/v1/auth routes.
+// Do NOT add it here again — that would double-restrict the login endpoint.
+
 import express from 'express';
 import {
   registerAdmin,
@@ -7,13 +11,13 @@ import {
   updatePassword,
   updateDetails
 } from '../controllers/authController.js';
-import { protect, authorize, loginLimiter } from '../../../middlewares/auth.js';
+import { protect } from '../../../middlewares/auth.js';
 
 const router = express.Router();
 
 // Public routes
 router.post('/register-admin', registerAdmin);
-router.post('/login', loginLimiter, login);
+router.post('/login', login);
 
 // Protected routes
 router.get('/logout', protect, logout);
