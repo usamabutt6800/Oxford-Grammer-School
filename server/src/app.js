@@ -20,6 +20,7 @@ import feeRoutes from './modules/fees/routes/feeRoutes.js';
 import paymentRoutes from './modules/payments/routes/paymentRoutes.js';
 import canteenRoutes from './modules/canteen/routes/canteenRoutes.js';
 import inventoryRoutes from './modules/inventory/routes/inventoryRoutes.js';
+import siblingRoutes from './modules/siblings/routes/siblingRoutes.js';
 
 const app = express();
 
@@ -183,6 +184,7 @@ app.use('/api/v1/fees', feeRoutes);
 app.use('/api/v1/payments', paymentRoutes);
 app.use('/api/v1/canteen', canteenRoutes);
 app.use('/api/v1/inventory', inventoryRoutes);
+app.use('/api/v1/siblings', siblingRoutes);
 
 // ========== 404 ==========
 app.use('/api/*', (req, res) => {

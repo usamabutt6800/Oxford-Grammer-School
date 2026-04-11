@@ -1,3 +1,4 @@
+// client/src/routes/AppRoutes.jsx
 import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -23,6 +24,7 @@ import AdminReports from '../pages/admin/Reports';
 import AdminCanteen from '../pages/admin/Canteen';
 import AdminInventory from '../pages/admin/Inventory';
 import AdminSettings from '../pages/admin/Settings';
+import AdminSiblings from '../pages/admin/Siblings';
 import AdminExams from '../pages/admin/exams/Exams';
 import CreateExam from '../pages/admin/exams/CreateExam';
 import EditExam from '../pages/admin/exams/EditExam';
@@ -41,7 +43,6 @@ import PublicLayout from '../layouts/PublicLayout';
 import AdminLayout from '../layouts/AdminLayout';
 import TeacherLayout from '../layouts/TeacherLayout';
 
-// Protected Route Component
 const ProtectedRoute = ({ children, allowedRoles }) => {
   const { user, loading } = useAuth();
 
@@ -53,14 +54,8 @@ const ProtectedRoute = ({ children, allowedRoles }) => {
     );
   }
 
-  if (!user) {
-    return <Navigate to="/login" />;
-  }
-
-  if (allowedRoles && !allowedRoles.includes(user.role)) {
-    return <Navigate to="/" />;
-  }
-
+  if (!user) return <Navigate to="/login" />;
+  if (allowedRoles && !allowedRoles.includes(user.role)) return <Navigate to="/" />;
   return children;
 };
 
@@ -93,15 +88,16 @@ const AppRoutes = () => {
         <Route path="fees/generator" element={<FeesGenerator />} />
         <Route path="payments" element={<AdminPayments />} />
         <Route path="reports" element={<AdminReports />} />
-          <Route path="canteen" element={<AdminCanteen />} />
-  <Route path="inventory" element={<AdminInventory />} />
-  <Route path="settings" element={<AdminSettings />} />
-  <Route path="exams" element={<AdminExams />} />
-<Route path="exams/create" element={<CreateExam />} />
-<Route path="exams/edit/:id" element={<EditExam />} />
-<Route path="exams/:id/results" element={<ExamResults />} />
-<Route path="exams/:id/promote" element={<Promotion />} />
-<Route path="exams/reports" element={<ExamReports />} />
+        <Route path="canteen" element={<AdminCanteen />} />
+        <Route path="inventory" element={<AdminInventory />} />
+        <Route path="settings" element={<AdminSettings />} />
+        <Route path="siblings" element={<AdminSiblings />} />
+        <Route path="exams" element={<AdminExams />} />
+        <Route path="exams/create" element={<CreateExam />} />
+        <Route path="exams/edit/:id" element={<EditExam />} />
+        <Route path="exams/:id/results" element={<ExamResults />} />
+        <Route path="exams/:id/promote" element={<Promotion />} />
+        <Route path="exams/reports" element={<ExamReports />} />
       </Route>
 
       {/* Teacher Routes */}
@@ -117,7 +113,6 @@ const AppRoutes = () => {
         <Route path="students" element={<TeacherStudents />} />
       </Route>
 
-      {/* Catch all route */}
       <Route path="*" element={<Navigate to="/" />} />
     </Routes>
   );
