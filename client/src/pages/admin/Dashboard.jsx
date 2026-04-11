@@ -1,94 +1,97 @@
 // client/src/pages/admin/Dashboard.jsx
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   FaUsers, FaChalkboardTeacher, FaMoneyBillWave, FaCalendarAlt,
   FaChartLine, FaSchool, FaArrowUp,
   FaUserGraduate, FaUtensils,
   FaBox, FaSpinner, FaSync, FaExclamationTriangle,
-  FaCreditCard, FaCoffee, FaClipboardList
+  FaCreditCard, FaCoffee, FaClipboardList, FaUserTie, FaFileInvoiceDollar
 } from 'react-icons/fa';
-import { Bar, Line, Doughnut } from 'react-chartjs-2';
+import { Bar, Doughnut } from 'react-chartjs-2';
 import {
   Chart as ChartJS, CategoryScale, LinearScale, BarElement,
-  LineElement, PointElement, ArcElement, Title, Tooltip, Legend, Filler
+  ArcElement, Title, Tooltip, Legend,
 } from 'chart.js';
-import { format } from 'date-fns';
 import toast from 'react-hot-toast';
 import { useAuth } from '../../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 
-ChartJS.register(
-  CategoryScale, LinearScale, BarElement, LineElement,
-  PointElement, ArcElement, Title, Tooltip, Legend, Filler
-);
+ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Title, Tooltip, Legend);
 
 const PKRIcon = ({ className, size }) => (
   <span className={className} style={{ fontSize: size }}>Rs.</span>
 );
 
+// Activity type config
+const ACTIVITY_CONFIG = {
+  admission:  { color: 'bg-green-100',  icon: <FaUserGraduate className="text-green-600" /> },
+  teacher:    { color: 'bg-blue-100',   icon: <FaUserTie className="text-blue-600" /> },
+  payment:    { color: 'bg-purple-100', icon: <FaMoneyBillWave className="text-purple-600" /> },
+  fee:        { color: 'bg-orange-100', icon: <FaFileInvoiceDollar className="text-orange-600" /> },
+  attendance: { color: 'bg-yellow-100', icon: <FaCalendarAlt className="text-yellow-600" /> },
+};
+
 const AdminDashboard = () => {
   const { api } = useAuth();
   const navigate = useNavigate();
 
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading]     = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [dashboardData, setDashboardData] = useState({
-    students: { total: 0, active: 0, newThisMonth: 0, classDistribution: [] },
-    teachers: { total: 0, active: 0, newThisMonth: 0 },
-    attendance: { today: 0, average: 0, weekly: [], present: 0, absent: 0, leave: 0 },
-    fees: { collected: 0, pending: 0, collectionRate: 0 },
-    canteen: { todaySales: 0, todayItems: 0, monthSales: 0, lowStock: 0, profit: 0 },
-    inventory: { totalItems: 0, lowStock: 0, outOfStock: 0, totalValue: 0 },
-    recentActivities: []
+    students:   { total: 0, active: 0, newThisMonth: 0, classDistribution: [] },
+    teachers:   { total: 0, active: 0, newThisMonth: 0 },
+    attendance: { today: 0, average: 0, present: 0, absent: 0, leave: 0 },
+    fees:       { collected: 0, pending: 0, collectionRate: 0 },
+    canteen:    { todaySales: 0, todayItems: 0, monthSales: 0, lowStock: 0, profit: 0 },
+    inventory:  { totalItems: 0, lowStock: 0, outOfStock: 0, totalValue: 0 },
   });
 
-  const formatPKR = (amount) => {
-    if (amount === undefined || amount === null) return 'Rs. 0';
-    return `Rs. ${amount.toLocaleString('en-PK')}`;
-  };
+  // Activity log state — infinite scroll
+  const [activities, setActivities]         = useState([]);
+  const [actPage, setActPage]               = useState(1);
+  const [actHasMore, setActHasMore]         = useState(true);
+  const [actLoading, setActLoading]         = useState(false);
+  const activityRef = useRef(null);
 
-  const fetchRecentActivities = useCallback(async (axiosInstance) => {
+  const formatPKR = (amount) => `Rs. ${(amount || 0).toLocaleString('en-PK')}`;
+
+  // ── Fetch activity log page ──────────────────────────────────────
+  const fetchActivities = useCallback(async (page = 1, append = false) => {
     try {
-      const activities = [];
-      const [students, payments] = await Promise.all([
-        axiosInstance.get('/students', { params: { limit: 5, sort: '-createdAt' } }).catch(() => null),
-        axiosInstance.get('/payments', { params: { limit: 5 } }).catch(() => null),
-      ]);
-
-      if (students?.data?.success) {
-        students.data.data.forEach(s => {
-          activities.push({
-            action: `New admission: ${s.firstName} ${s.lastName || ''} (${s.admissionNo}) — Class ${s.currentClass}-${s.section}`,
-            time: format(new Date(s.createdAt), 'dd MMM, hh:mm a'),
-            type: 'admission',
-            link: '/admin/students'
-          });
-        });
+      setActLoading(true);
+      const res = await api().get('/dashboard/activity', { params: { page, limit: 20 } });
+      if (res.data.success) {
+        setActivities(prev => append ? [...prev, ...res.data.data] : res.data.data);
+        setActHasMore(res.data.hasMore);
+        setActPage(page);
       }
-      if (payments?.data?.success) {
-        payments.data.data.forEach(p => {
-          activities.push({
-            action: `Fee payment: ${formatPKR(p.amount)} from ${p.studentName || 'Student'}`,
-            time: format(new Date(p.date), 'dd MMM, hh:mm a'),
-            type: 'payment',
-            link: '/admin/payments'
-          });
-        });
-      }
-      return activities.sort((a, b) => new Date(b.time) - new Date(a.time)).slice(0, 5);
     } catch {
-      return [];
+      // silently fail — not critical
+    } finally {
+      setActLoading(false);
     }
-  }, []);
+  }, [api]);
 
+  // ── Infinite scroll observer ────────────────────────────────────
+  useEffect(() => {
+    if (!activityRef.current) return;
+    const observer = new IntersectionObserver(
+      entries => {
+        if (entries[0].isIntersecting && actHasMore && !actLoading) {
+          fetchActivities(actPage + 1, true);
+        }
+      },
+      { threshold: 0.1 }
+    );
+    observer.observe(activityRef.current);
+    return () => observer.disconnect();
+  }, [actHasMore, actLoading, actPage, fetchActivities]);
+
+  // ── Fetch stats ─────────────────────────────────────────────────
   const fetchDashboardData = useCallback(async () => {
-    // Get a fresh axios instance inside the callback to avoid stale closures
     const axiosInstance = api();
-
     try {
       setLoading(true);
-
-      // Use dedicated stats endpoints — no full list fetches
       const [studentStats, teacherStats, attendanceRes, feesRes, canteenRes, inventoryRes] = await Promise.all([
         axiosInstance.get('/students/stats/summary').catch(() => ({ data: { success: false } })),
         axiosInstance.get('/teachers/stats').catch(() => ({ data: { success: false } })),
@@ -98,97 +101,75 @@ const AdminDashboard = () => {
         axiosInstance.get('/inventory/stats').catch(() => ({ data: { success: false } })),
       ]);
 
-      // Students
-      const studentsData = {
-        total: studentStats.data?.data?.summary?.total || 0,
-        active: studentStats.data?.data?.summary?.active || 0,
-        newThisMonth: studentStats.data?.data?.summary?.newThisMonth || 0,
-        classDistribution: studentStats.data?.data?.classDistribution || [],
-      };
-
-      // Teachers
-      const teachersData = {
-        total: teacherStats.data?.data?.total || 0,
-        active: teacherStats.data?.data?.active || 0,
-        newThisMonth: teacherStats.data?.data?.newThisMonth || 0,
-      };
-
-      // Attendance
       const attData = attendanceRes.data?.data;
-      const attendanceData = {
-        today: attData?.today?.percentage || 0,
-        average: attData?.month?.percentage || 0,
-        present: attData?.today?.present || 0,
-        absent: attData?.today?.absent || 0,
-        leave: attData?.today?.leave || 0,
-        weekly: [], // Not using fake data
-      };
-
-      // Fees
       const feeData = feesRes.data?.data;
-      const feesData = {
-        collected: feeData?.totalPaid || 0,
-        pending: feeData?.totalDue || 0,
-        collectionRate: feeData?.collectionRate || 0,
-      };
-
-      // Canteen
       const canData = canteenRes.data?.data;
-      const canteenData = {
-        todaySales: canData?.today?.sales || 0,
-        todayItems: canData?.today?.itemsSold || 0,
-        monthSales: canData?.month?.sales || 0,
-        lowStock: canData?.inventory?.lowStock || 0,
-        profit: canData?.today?.profit || 0,
-      };
-
-      // Inventory
       const invData = inventoryRes.data?.data;
-      const inventoryData = {
-        totalItems: invData?.summary?.totalItems || 0,
-        lowStock: invData?.summary?.lowStock || 0,
-        outOfStock: invData?.summary?.outOfStock || 0,
-        totalValue: invData?.summary?.totalValue || 0,
-      };
-
-      const recentActivities = await fetchRecentActivities(axiosInstance);
 
       setDashboardData({
-        students: studentsData,
-        teachers: teachersData,
-        attendance: attendanceData,
-        fees: feesData,
-        canteen: canteenData,
-        inventory: inventoryData,
-        recentActivities,
+        students: {
+          total:             studentStats.data?.data?.summary?.total || 0,
+          active:            studentStats.data?.data?.summary?.active || 0,
+          newThisMonth:      studentStats.data?.data?.summary?.newThisMonth || 0,
+          classDistribution: studentStats.data?.data?.classDistribution || [],
+        },
+        teachers: {
+          total:        teacherStats.data?.data?.total || 0,
+          active:       teacherStats.data?.data?.active || 0,
+          newThisMonth: teacherStats.data?.data?.newThisMonth || 0,
+        },
+        attendance: {
+          today:   attData?.today?.percentage || 0,
+          average: attData?.month?.percentage || 0,
+          present: attData?.today?.present || 0,
+          absent:  attData?.today?.absent  || 0,
+          leave:   attData?.today?.leave   || 0,
+        },
+        fees: {
+          collected:      feeData?.totalPaid       || 0,
+          pending:        feeData?.totalDue        || 0,
+          collectionRate: feeData?.collectionRate  || 0,
+        },
+        canteen: {
+          todaySales: canData?.today?.sales      || 0,
+          todayItems: canData?.today?.itemsSold  || 0,
+          monthSales: canData?.month?.sales      || 0,
+          lowStock:   canData?.inventory?.lowStock || 0,
+          profit:     canData?.today?.profit     || 0,
+        },
+        inventory: {
+          totalItems:  invData?.summary?.totalItems  || 0,
+          lowStock:    invData?.summary?.lowStock    || 0,
+          outOfStock:  invData?.summary?.outOfStock  || 0,
+          totalValue:  invData?.summary?.totalValue  || 0,
+        },
       });
     } catch (error) {
-      console.error('Error fetching dashboard data:', error);
       toast.error('Failed to load some dashboard data');
     } finally {
       setLoading(false);
     }
-  }, [api, fetchRecentActivities]);
+  }, [api]);
 
   const refreshData = async () => {
     setRefreshing(true);
-    await fetchDashboardData();
+    await Promise.all([fetchDashboardData(), fetchActivities(1, false)]);
     setRefreshing(false);
     toast.success('Dashboard refreshed');
   };
 
   useEffect(() => {
     fetchDashboardData();
-  }, [fetchDashboardData]);
+    fetchActivities(1, false);
+  }, [fetchDashboardData, fetchActivities]);
 
-  // Chart data — only rendered when real data exists
+  // ── Chart data ──────────────────────────────────────────────────
   const feeChartData = {
     labels: ['Collected', 'Pending'],
     datasets: [{
       data: [dashboardData.fees.collected, dashboardData.fees.pending],
-      backgroundColor: ['rgba(34, 197, 94, 0.8)', 'rgba(239, 68, 68, 0.6)'],
-      borderRadius: 8,
-      barPercentage: 0.6,
+      backgroundColor: ['rgba(34,197,94,0.8)', 'rgba(239,68,68,0.6)'],
+      borderRadius: 8, barPercentage: 0.6,
     }],
   };
 
@@ -223,12 +204,10 @@ const AdminDashboard = () => {
           <h1 className="text-3xl font-bold text-gray-900">Admin Dashboard</h1>
           <p className="text-gray-600">Welcome back! Here's what's happening at Oxford Grammar School today.</p>
         </div>
-        <div className="flex space-x-3 mt-4 md:mt-0">
-          <button onClick={refreshData} disabled={refreshing} className="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg flex items-center transition">
-            <FaSync className={`mr-2 ${refreshing ? 'animate-spin' : ''}`} />
-            Refresh
-          </button>
-        </div>
+        <button onClick={refreshData} disabled={refreshing}
+          className="mt-4 md:mt-0 bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded-lg flex items-center transition">
+          <FaSync className={`mr-2 ${refreshing ? 'animate-spin' : ''}`} /> Refresh
+        </button>
       </div>
 
       {/* Stats Row 1 */}
@@ -361,7 +340,7 @@ const AdminDashboard = () => {
         </div>
       </div>
 
-      {/* Charts */}
+      {/* Charts + Class breakdown */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-white rounded-xl shadow-sm p-5">
           <h3 className="text-lg font-semibold text-gray-900 mb-4">Fee Collection Overview</h3>
@@ -384,22 +363,21 @@ const AdminDashboard = () => {
               }} />
             </div>
           ) : (
-            <div className="h-64 flex items-center justify-center text-gray-500">
+            <div className="h-64 flex items-center justify-center text-gray-400">
               <p>No student data available</p>
             </div>
           )}
         </div>
       </div>
 
-      {/* Class breakdown + Recent activities */}
+      {/* Class breakdown + Activity log */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-white rounded-xl shadow-sm p-5">
           <h3 className="text-lg font-semibold text-gray-900 mb-4">Class-wise Breakdown</h3>
           {dashboardData.students.classDistribution.length > 0 ? (
-            <div className="space-y-3 max-h-64 overflow-y-auto pr-2">
+            <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
               {dashboardData.students.classDistribution.map((item, index) => {
                 const maxCount = Math.max(...dashboardData.students.classDistribution.map(c => c.count), 1);
-                const percentage = (item.count / maxCount) * 100;
                 return (
                   <div key={index}>
                     <div className="flex items-center justify-between mb-1">
@@ -409,35 +387,50 @@ const AdminDashboard = () => {
                       <span className="text-sm font-bold text-gray-900">{item.count} students</span>
                     </div>
                     <div className="w-full bg-gray-100 rounded-full h-2">
-                      <div className="bg-gradient-to-r from-blue-500 to-blue-600 h-2 rounded-full transition-all duration-500" style={{ width: `${percentage}%` }} />
+                      <div className="bg-gradient-to-r from-blue-500 to-blue-600 h-2 rounded-full transition-all duration-500"
+                        style={{ width: `${(item.count / maxCount) * 100}%` }} />
                     </div>
                   </div>
                 );
               })}
             </div>
           ) : (
-            <div className="text-center py-8 text-gray-500"><p>No student data available</p></div>
+            <div className="text-center py-8 text-gray-400"><p>No student data available</p></div>
           )}
         </div>
 
-        <div className="bg-white rounded-xl shadow-sm p-5">
+        {/* Activity log with infinite scroll */}
+        <div className="bg-white rounded-xl shadow-sm p-5 flex flex-col">
           <h3 className="text-lg font-semibold text-gray-900 mb-4">Recent Activities</h3>
-          <div className="space-y-3 max-h-80 overflow-y-auto">
-            {dashboardData.recentActivities.length > 0 ? (
-              dashboardData.recentActivities.map((activity, index) => (
-                <div key={index} className="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition cursor-pointer" onClick={() => activity.link && navigate(activity.link)}>
-                  <div className={`p-2 rounded-lg mr-3 flex-shrink-0 ${activity.type === 'admission' ? 'bg-green-100' : activity.type === 'payment' ? 'bg-blue-100' : 'bg-gray-100'}`}>
-                    {activity.type === 'admission' && <FaUserGraduate className="text-green-600" />}
-                    {activity.type === 'payment' && <FaMoneyBillWave className="text-blue-600" />}
-                  </div>
-                  <div className="flex-1">
-                    <p className="text-sm font-medium text-gray-900">{activity.action}</p>
-                    <p className="text-xs text-gray-500 mt-1">{activity.time}</p>
-                  </div>
-                </div>
-              ))
+          <div className="flex-1 overflow-y-auto max-h-72 space-y-2 pr-1">
+            {activities.length === 0 && !actLoading ? (
+              <div className="text-center py-8 text-gray-400"><p>No activities yet</p></div>
             ) : (
-              <div className="text-center py-8 text-gray-500"><p>No recent activities</p></div>
+              <>
+                {activities.map((activity, index) => {
+                  const config = ACTIVITY_CONFIG[activity.type] || ACTIVITY_CONFIG.admission;
+                  return (
+                    <div key={index}
+                      className="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition cursor-pointer"
+                      onClick={() => activity.link && navigate(activity.link)}>
+                      <div className={`p-2 rounded-lg mr-3 flex-shrink-0 ${config.color}`}>
+                        {config.icon}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-gray-900 leading-snug">{activity.action}</p>
+                        <p className="text-xs text-gray-500 mt-0.5">{activity.timeFormatted}</p>
+                      </div>
+                    </div>
+                  );
+                })}
+                {/* Sentinel for infinite scroll */}
+                <div ref={activityRef} className="py-2 text-center">
+                  {actLoading && <FaSpinner className="animate-spin text-blue-500 mx-auto" />}
+                  {!actHasMore && activities.length > 0 && (
+                    <p className="text-xs text-gray-400">All activities loaded</p>
+                  )}
+                </div>
+              </>
             )}
           </div>
         </div>
@@ -448,15 +441,16 @@ const AdminDashboard = () => {
         <h3 className="text-lg font-semibold text-gray-900 mb-4">Quick Actions</h3>
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-7 gap-3">
           {[
-            { path: '/admin/students', icon: <FaUserGraduate className="text-xl text-blue-600 mx-auto mb-2" />, label: 'Students', bg: 'bg-blue-50 hover:bg-blue-100' },
-            { path: '/admin/teachers', icon: <FaChalkboardTeacher className="text-xl text-green-600 mx-auto mb-2" />, label: 'Teachers', bg: 'bg-green-50 hover:bg-green-100' },
-            { path: '/admin/fees', icon: <FaMoneyBillWave className="text-xl text-purple-600 mx-auto mb-2" />, label: 'Fees', bg: 'bg-purple-50 hover:bg-purple-100' },
-            { path: '/admin/payments', icon: <FaCreditCard className="text-xl text-indigo-600 mx-auto mb-2" />, label: 'Payments', bg: 'bg-indigo-50 hover:bg-indigo-100' },
-            { path: '/admin/attendance', icon: <FaClipboardList className="text-xl text-yellow-600 mx-auto mb-2" />, label: 'Attendance', bg: 'bg-yellow-50 hover:bg-yellow-100' },
-            { path: '/admin/canteen', icon: <FaCoffee className="text-xl text-orange-600 mx-auto mb-2" />, label: 'Canteen', bg: 'bg-orange-50 hover:bg-orange-100' },
-            { path: '/admin/inventory', icon: <FaBox className="text-xl text-teal-600 mx-auto mb-2" />, label: 'Inventory', bg: 'bg-teal-50 hover:bg-teal-100' },
+            { path: '/admin/students',   icon: <FaUserGraduate className="text-xl text-blue-600 mx-auto mb-2" />,        label: 'Students',   bg: 'bg-blue-50 hover:bg-blue-100' },
+            { path: '/admin/teachers',   icon: <FaChalkboardTeacher className="text-xl text-green-600 mx-auto mb-2" />,  label: 'Teachers',   bg: 'bg-green-50 hover:bg-green-100' },
+            { path: '/admin/fees',       icon: <FaMoneyBillWave className="text-xl text-purple-600 mx-auto mb-2" />,     label: 'Fees',       bg: 'bg-purple-50 hover:bg-purple-100' },
+            { path: '/admin/payments',   icon: <FaCreditCard className="text-xl text-indigo-600 mx-auto mb-2" />,        label: 'Payments',   bg: 'bg-indigo-50 hover:bg-indigo-100' },
+            { path: '/admin/attendance', icon: <FaClipboardList className="text-xl text-yellow-600 mx-auto mb-2" />,     label: 'Attendance', bg: 'bg-yellow-50 hover:bg-yellow-100' },
+            { path: '/admin/canteen',    icon: <FaCoffee className="text-xl text-orange-600 mx-auto mb-2" />,            label: 'Canteen',    bg: 'bg-orange-50 hover:bg-orange-100' },
+            { path: '/admin/inventory',  icon: <FaBox className="text-xl text-teal-600 mx-auto mb-2" />,                 label: 'Inventory',  bg: 'bg-teal-50 hover:bg-teal-100' },
           ].map(({ path, icon, label, bg }) => (
-            <button key={path} onClick={() => navigate(path)} className={`p-3 ${bg} rounded-xl text-center transition group`}>
+            <button key={path} onClick={() => navigate(path)}
+              className={`p-3 ${bg} rounded-xl text-center transition group`}>
               {icon}
               <span className="text-xs text-gray-700">{label}</span>
             </button>

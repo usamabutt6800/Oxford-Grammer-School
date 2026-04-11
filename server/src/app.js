@@ -87,17 +87,27 @@ app.get('/api/v1/students/stats/summary', protect, async (req, res) => {
   try {
     const Student = mongoose.model('Student');
     const now = new Date();
-    const [total, active, newThisMonth] = await Promise.all([
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const monthEnd   = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+
+    const [total, active, newThisMonth, classWise] = await Promise.all([
       Student.countDocuments(),
       Student.countDocuments({ status: 'Active' }),
-      Student.countDocuments({
-        createdAt: {
-          $gte: new Date(now.getFullYear(), now.getMonth(), 1),
-          $lt: new Date(now.getFullYear(), now.getMonth() + 1, 1),
-        },
-      }),
+      Student.countDocuments({ createdAt: { $gte: monthStart, $lt: monthEnd } }),
+      Student.aggregate([
+        { $match: { status: 'Active' } },
+        { $group: { _id: '$currentClass', count: { $sum: 1 } } },
+        { $sort: { _id: 1 } },
+      ]),
     ]);
-    res.json({ success: true, data: { summary: { total, active, newThisMonth } } });
+
+    // Sort class distribution in school order
+    const classOrder = ['Play Group','Nursery','Prep','1','2','3','4','5','6','7','8','9','10'];
+    const classDistribution = classOrder
+      .map(cls => { const found = classWise.find(c => c._id === cls); return found ? { class: cls, count: found.count } : null; })
+      .filter(Boolean);
+
+    res.json({ success: true, data: { summary: { total, active, newThisMonth }, classDistribution } });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -106,11 +116,105 @@ app.get('/api/v1/students/stats/summary', protect, async (req, res) => {
 app.get('/api/v1/teachers/stats', protect, async (req, res) => {
   try {
     const Teacher = mongoose.model('Teacher');
-    const [total, active] = await Promise.all([
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const monthEnd   = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+
+    const [total, active, newThisMonth] = await Promise.all([
       Teacher.countDocuments(),
       Teacher.countDocuments({ status: 'Active' }),
+      Teacher.countDocuments({ createdAt: { $gte: monthStart, $lt: monthEnd } }),
     ]);
-    res.json({ success: true, data: { total, active, newThisMonth: 0 } });
+    res.json({ success: true, data: { total, active, newThisMonth } });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Activity log — pulls recent actions across students, teachers, payments, fees, attendance
+app.get('/api/v1/dashboard/activity', protect, async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 20;
+    const page  = parseInt(req.query.page)  || 1;
+    const skip  = (page - 1) * limit;
+
+    const Student    = mongoose.model('Student');
+    const Teacher    = mongoose.model('Teacher');
+    const Fee        = mongoose.model('Fee');
+    const Payment    = mongoose.model('Payment');
+    const Attendance = mongoose.model('Attendance');
+
+    const [students, teachers, payments, fees, attendances] = await Promise.all([
+      Student.find().select('firstName lastName admissionNo currentClass section createdAt updatedAt').sort({ createdAt: -1 }).limit(50).lean(),
+      Teacher.find().select('firstName lastName createdAt').sort({ createdAt: -1 }).limit(30).lean(),
+      Payment.find().select('studentName amount paymentMode paymentDate receiptNumber').sort({ paymentDate: -1 }).limit(50).lean(),
+      Fee.find({ isGenerated: true }).select('studentName studentClass studentSection month academicYear createdAt').sort({ createdAt: -1 }).limit(50).lean(),
+      Attendance.find({ approvalStatus: 'Approved' }).select('class section date approvalStatus createdAt').sort({ createdAt: -1 }).limit(30).lean(),
+    ]);
+
+    const activities = [];
+
+    students.forEach(s => {
+      activities.push({
+        type: 'admission',
+        action: `New student admitted: ${s.firstName} ${s.lastName || ''} (${s.admissionNo}) — Class ${s.currentClass}-${s.section}`,
+        time: s.createdAt,
+        link: '/admin/students',
+      });
+    });
+
+    teachers.forEach(t => {
+      activities.push({
+        type: 'teacher',
+        action: `New teacher added: ${t.firstName} ${t.lastName || ''}`,
+        time: t.createdAt,
+        link: '/admin/teachers',
+      });
+    });
+
+    payments.forEach(p => {
+      activities.push({
+        type: 'payment',
+        action: `Fee payment received: Rs. ${(p.amount || 0).toLocaleString('en-PK')} from ${p.studentName || 'Student'} (${p.paymentMode || 'Cash'})`,
+        time: p.paymentDate,
+        link: '/admin/payments',
+      });
+    });
+
+    fees.forEach(f => {
+      activities.push({
+        type: 'fee',
+        action: `Fee generated for ${f.studentName || 'Student'} — Class ${f.studentClass || ''} — ${f.month} ${f.academicYear}`,
+        time: f.createdAt,
+        link: '/admin/fees',
+      });
+    });
+
+    attendances.forEach(a => {
+      activities.push({
+        type: 'attendance',
+        action: `Attendance approved — Class ${a.class}-${a.section}`,
+        time: a.createdAt,
+        link: '/admin/attendance',
+      });
+    });
+
+    // Sort all by time descending
+    activities.sort((a, b) => new Date(b.time) - new Date(a.time));
+
+    const total = activities.length;
+    const paginated = activities.slice(skip, skip + limit);
+
+    res.json({
+      success: true,
+      total,
+      page,
+      hasMore: skip + limit < total,
+      data: paginated.map(a => ({
+        ...a,
+        timeFormatted: a.time ? new Date(a.time).toLocaleString('en-PK', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '',
+      })),
+    });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
