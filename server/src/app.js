@@ -131,84 +131,142 @@ app.get('/api/v1/teachers/stats', protect, async (req, res) => {
   }
 });
 
-// Activity log — pulls recent actions across students, teachers, payments, fees, attendance
+// ── General Activity Log (fees, payments, students, teachers) ──────
 app.get('/api/v1/dashboard/activity', protect, async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 20;
     const page  = parseInt(req.query.page)  || 1;
     const skip  = (page - 1) * limit;
 
-    const Student    = mongoose.model('Student');
-    const Teacher    = mongoose.model('Teacher');
-    const Fee        = mongoose.model('Fee');
-    const Payment    = mongoose.model('Payment');
-    const Attendance = mongoose.model('Attendance');
+    const Student = mongoose.model('Student');
+    const Teacher = mongoose.model('Teacher');
+    const Fee     = mongoose.model('Fee');
+    const Payment = mongoose.model('Payment');
 
-    const [students, teachers, payments, fees, attendances] = await Promise.all([
-      Student.find().select('firstName lastName admissionNo currentClass section createdAt updatedAt').sort({ createdAt: -1 }).limit(50).lean(),
+    const [students, teachers, payments, fees] = await Promise.all([
+      Student.find().select('firstName lastName admissionNo currentClass section createdAt').sort({ createdAt: -1 }).limit(50).lean(),
       Teacher.find().select('firstName lastName createdAt').sort({ createdAt: -1 }).limit(30).lean(),
-      Payment.find().select('studentName amount paymentMode paymentDate receiptNumber').sort({ paymentDate: -1 }).limit(50).lean(),
-      Fee.find({ isGenerated: true }).select('studentName studentClass studentSection month academicYear createdAt').sort({ createdAt: -1 }).limit(50).lean(),
-      Attendance.find({ approvalStatus: 'Approved' }).select('class section date approvalStatus createdAt').sort({ createdAt: -1 }).limit(30).lean(),
+      Payment.find().select('studentName amount paymentMode paymentDate receiptNumber').sort({ paymentDate: -1 }).limit(60).lean(),
+      Fee.find({ isGenerated: true }).select('studentName studentClass studentSection month academicYear createdAt').sort({ createdAt: -1 }).limit(60).lean(),
     ]);
 
     const activities = [];
 
-    students.forEach(s => {
-      activities.push({
-        type: 'admission',
-        action: `New student admitted: ${s.firstName} ${s.lastName || ''} (${s.admissionNo}) — Class ${s.currentClass}-${s.section}`,
-        time: s.createdAt,
-        link: '/admin/students',
-      });
-    });
+    students.forEach(s => activities.push({
+      type: 'admission',
+      action: `New student admitted: ${s.firstName} ${s.lastName || ''} (${s.admissionNo}) — Class ${s.currentClass}-${s.section}`,
+      time: s.createdAt,
+      link: '/admin/students',
+    }));
 
-    teachers.forEach(t => {
-      activities.push({
-        type: 'teacher',
-        action: `New teacher added: ${t.firstName} ${t.lastName || ''}`,
-        time: t.createdAt,
-        link: '/admin/teachers',
-      });
-    });
+    teachers.forEach(t => activities.push({
+      type: 'teacher',
+      action: `New teacher added: ${t.firstName} ${t.lastName || ''}`,
+      time: t.createdAt,
+      link: '/admin/teachers',
+    }));
 
-    payments.forEach(p => {
-      activities.push({
-        type: 'payment',
-        action: `Fee payment received: Rs. ${(p.amount || 0).toLocaleString('en-PK')} from ${p.studentName || 'Student'} (${p.paymentMode || 'Cash'})`,
-        time: p.paymentDate,
-        link: '/admin/payments',
-      });
-    });
+    payments.forEach(p => activities.push({
+      type: 'payment',
+      action: `Payment received: Rs. ${(p.amount || 0).toLocaleString('en-PK')} from ${p.studentName || 'Student'} (${p.paymentMode || 'Cash'}) — ${p.receiptNumber || ''}`,
+      time: p.paymentDate,
+      link: '/admin/payments',
+    }));
 
-    fees.forEach(f => {
-      activities.push({
-        type: 'fee',
-        action: `Fee generated for ${f.studentName || 'Student'} — Class ${f.studentClass || ''} — ${f.month} ${f.academicYear}`,
-        time: f.createdAt,
-        link: '/admin/fees',
-      });
-    });
+    fees.forEach(f => activities.push({
+      type: 'fee',
+      action: `Fee generated: ${f.studentName || 'Student'} — Class ${f.studentClass || ''}${f.studentSection || ''} — ${f.month} ${f.academicYear}`,
+      time: f.createdAt,
+      link: '/admin/fees',
+    }));
 
-    attendances.forEach(a => {
-      activities.push({
-        type: 'attendance',
-        action: `Attendance approved — Class ${a.class}-${a.section}`,
-        time: a.createdAt,
-        link: '/admin/attendance',
-      });
-    });
-
-    // Sort all by time descending
     activities.sort((a, b) => new Date(b.time) - new Date(a.time));
 
     const total = activities.length;
     const paginated = activities.slice(skip, skip + limit);
 
     res.json({
-      success: true,
-      total,
-      page,
+      success: true, total, page,
+      hasMore: skip + limit < total,
+      data: paginated.map(a => ({
+        ...a,
+        timeFormatted: a.time ? new Date(a.time).toLocaleString('en-PK', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '',
+      })),
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ── Attendance Activity Log (approvals, teacher submissions, holidays) ──
+app.get('/api/v1/dashboard/attendance-activity', protect, async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 20;
+    const page  = parseInt(req.query.page)  || 1;
+    const skip  = (page - 1) * limit;
+
+    const Attendance = mongoose.model('Attendance');
+    const Holiday    = mongoose.model('Holiday');
+
+    const [approvedGroups, pendingGroups, holidays] = await Promise.all([
+      // Group approved attendance by class+section+date for cleaner logs
+      Attendance.aggregate([
+        { $match: { approvalStatus: 'Approved' } },
+        { $group: {
+          _id: { class: '$class', section: '$section', date: { $dateToString: { format: '%Y-%m-%d', date: '$date' } } },
+          count: { $sum: 1 },
+          present: { $sum: { $cond: [{ $eq: ['$status', 'Present'] }, 1, 0] } },
+          absent:  { $sum: { $cond: [{ $eq: ['$status', 'Absent']  }, 1, 0] } },
+          leave:   { $sum: { $cond: [{ $eq: ['$status', 'Leave']   }, 1, 0] } },
+          approvedAt: { $max: '$approvedAt' },
+        }},
+        { $sort: { approvedAt: -1 } },
+        { $limit: 60 },
+      ]),
+      // Pending submissions
+      Attendance.aggregate([
+        { $match: { approvalStatus: 'Pending' } },
+        { $group: {
+          _id: { class: '$class', section: '$section', date: { $dateToString: { format: '%Y-%m-%d', date: '$date' } } },
+          count: { $sum: 1 },
+          createdAt: { $max: '$createdAt' },
+        }},
+        { $sort: { createdAt: -1 } },
+        { $limit: 30 },
+      ]),
+      Holiday.find().select('date title type createdAt').sort({ createdAt: -1 }).limit(20).lean(),
+    ]);
+
+    const activities = [];
+
+    approvedGroups.forEach(g => activities.push({
+      type: 'approved',
+      action: `Attendance approved — Class ${g._id.class}-${g._id.section} on ${g._id.date} (P:${g.present} A:${g.absent} L:${g.leave})`,
+      time: g.approvedAt || g._id.date,
+      link: '/admin/attendance',
+    }));
+
+    pendingGroups.forEach(g => activities.push({
+      type: 'pending',
+      action: `Attendance submitted (pending) — Class ${g._id.class}-${g._id.section} on ${g._id.date} — ${g.count} student(s)`,
+      time: g.createdAt,
+      link: '/admin/attendance',
+    }));
+
+    holidays.forEach(h => activities.push({
+      type: 'holiday',
+      action: `Holiday marked: ${h.title} (${h.type}) on ${new Date(h.date).toLocaleDateString('en-PK', { day: '2-digit', month: 'short', year: 'numeric' })}`,
+      time: h.createdAt,
+      link: '/admin/attendance',
+    }));
+
+    activities.sort((a, b) => new Date(b.time) - new Date(a.time));
+
+    const total = activities.length;
+    const paginated = activities.slice(skip, skip + limit);
+
+    res.json({
+      success: true, total, page,
       hasMore: skip + limit < total,
       data: paginated.map(a => ({
         ...a,

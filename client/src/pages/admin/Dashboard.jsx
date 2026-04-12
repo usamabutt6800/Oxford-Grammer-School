@@ -5,7 +5,8 @@ import {
   FaChartLine, FaSchool, FaArrowUp,
   FaUserGraduate, FaUtensils,
   FaBox, FaSpinner, FaSync, FaExclamationTriangle,
-  FaCreditCard, FaCoffee, FaClipboardList, FaUserTie, FaFileInvoiceDollar
+  FaCreditCard, FaCoffee, FaClipboardList, FaUserTie, FaFileInvoiceDollar,
+  FaCheckCircle, FaClock, FaSun
 } from 'react-icons/fa';
 import { Bar, Doughnut } from 'react-chartjs-2';
 import {
@@ -22,20 +23,26 @@ const PKRIcon = ({ className, size }) => (
   <span className={className} style={{ fontSize: size }}>Rs.</span>
 );
 
-// Activity type config
+// General activity config
 const ACTIVITY_CONFIG = {
-  admission:  { color: 'bg-green-100',  icon: <FaUserGraduate className="text-green-600" /> },
-  teacher:    { color: 'bg-blue-100',   icon: <FaUserTie className="text-blue-600" /> },
-  payment:    { color: 'bg-purple-100', icon: <FaMoneyBillWave className="text-purple-600" /> },
-  fee:        { color: 'bg-orange-100', icon: <FaFileInvoiceDollar className="text-orange-600" /> },
-  attendance: { color: 'bg-yellow-100', icon: <FaCalendarAlt className="text-yellow-600" /> },
+  admission:  { color: 'bg-green-100',  icon: <FaUserGraduate className="text-green-600" size={13} /> },
+  teacher:    { color: 'bg-blue-100',   icon: <FaUserTie className="text-blue-600" size={13} /> },
+  payment:    { color: 'bg-purple-100', icon: <FaMoneyBillWave className="text-purple-600" size={13} /> },
+  fee:        { color: 'bg-orange-100', icon: <FaFileInvoiceDollar className="text-orange-600" size={13} /> },
+};
+
+// Attendance activity config
+const ATTENDANCE_CONFIG = {
+  approved: { color: 'bg-green-100',  icon: <FaCheckCircle className="text-green-600" size={13} /> },
+  pending:  { color: 'bg-yellow-100', icon: <FaClock className="text-yellow-600" size={13} /> },
+  holiday:  { color: 'bg-red-100',    icon: <FaSun className="text-red-500" size={13} /> },
 };
 
 const AdminDashboard = () => {
   const { api } = useAuth();
   const navigate = useNavigate();
 
-  const [loading, setLoading]     = useState(true);
+  const [loading, setLoading]       = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [dashboardData, setDashboardData] = useState({
     students:   { total: 0, active: 0, newThisMonth: 0, classDistribution: [] },
@@ -46,16 +53,23 @@ const AdminDashboard = () => {
     inventory:  { totalItems: 0, lowStock: 0, outOfStock: 0, totalValue: 0 },
   });
 
-  // Activity log state — infinite scroll
-  const [activities, setActivities]         = useState([]);
-  const [actPage, setActPage]               = useState(1);
-  const [actHasMore, setActHasMore]         = useState(true);
-  const [actLoading, setActLoading]         = useState(false);
+  // ── General activity (fees/payments/students/teachers) ───────────
+  const [activities,    setActivities]    = useState([]);
+  const [actPage,       setActPage]       = useState(1);
+  const [actHasMore,    setActHasMore]    = useState(true);
+  const [actLoading,    setActLoading]    = useState(false);
   const activityRef = useRef(null);
+
+  // ── Attendance activity ──────────────────────────────────────────
+  const [attActivities, setAttActivities] = useState([]);
+  const [attPage,       setAttPage]       = useState(1);
+  const [attHasMore,    setAttHasMore]    = useState(true);
+  const [attLoading,    setAttLoading]    = useState(false);
+  const attActivityRef = useRef(null);
 
   const formatPKR = (amount) => `Rs. ${(amount || 0).toLocaleString('en-PK')}`;
 
-  // ── Fetch activity log page ──────────────────────────────────────
+  // ── Fetch general activity ───────────────────────────────────────
   const fetchActivities = useCallback(async (page = 1, append = false) => {
     try {
       setActLoading(true);
@@ -65,27 +79,43 @@ const AdminDashboard = () => {
         setActHasMore(res.data.hasMore);
         setActPage(page);
       }
-    } catch {
-      // silently fail — not critical
-    } finally {
-      setActLoading(false);
-    }
+    } catch { /* silently fail */ } finally { setActLoading(false); }
   }, [api]);
 
-  // ── Infinite scroll observer ────────────────────────────────────
+  // ── Fetch attendance activity ────────────────────────────────────
+  const fetchAttActivities = useCallback(async (page = 1, append = false) => {
+    try {
+      setAttLoading(true);
+      const res = await api().get('/dashboard/attendance-activity', { params: { page, limit: 20 } });
+      if (res.data.success) {
+        setAttActivities(prev => append ? [...prev, ...res.data.data] : res.data.data);
+        setAttHasMore(res.data.hasMore);
+        setAttPage(page);
+      }
+    } catch { /* silently fail */ } finally { setAttLoading(false); }
+  }, [api]);
+
+  // ── Infinite scroll — general activities ────────────────────────
   useEffect(() => {
     if (!activityRef.current) return;
     const observer = new IntersectionObserver(
-      entries => {
-        if (entries[0].isIntersecting && actHasMore && !actLoading) {
-          fetchActivities(actPage + 1, true);
-        }
-      },
+      entries => { if (entries[0].isIntersecting && actHasMore && !actLoading) fetchActivities(actPage + 1, true); },
       { threshold: 0.1 }
     );
     observer.observe(activityRef.current);
     return () => observer.disconnect();
   }, [actHasMore, actLoading, actPage, fetchActivities]);
+
+  // ── Infinite scroll — attendance activities ──────────────────────
+  useEffect(() => {
+    if (!attActivityRef.current) return;
+    const observer = new IntersectionObserver(
+      entries => { if (entries[0].isIntersecting && attHasMore && !attLoading) fetchAttActivities(attPage + 1, true); },
+      { threshold: 0.1 }
+    );
+    observer.observe(attActivityRef.current);
+    return () => observer.disconnect();
+  }, [attHasMore, attLoading, attPage, fetchAttActivities]);
 
   // ── Fetch stats ─────────────────────────────────────────────────
   const fetchDashboardData = useCallback(async () => {
@@ -153,7 +183,11 @@ const AdminDashboard = () => {
 
   const refreshData = async () => {
     setRefreshing(true);
-    await Promise.all([fetchDashboardData(), fetchActivities(1, false)]);
+    await Promise.all([
+      fetchDashboardData(),
+      fetchActivities(1, false),
+      fetchAttActivities(1, false),
+    ]);
     setRefreshing(false);
     toast.success('Dashboard refreshed');
   };
@@ -161,7 +195,8 @@ const AdminDashboard = () => {
   useEffect(() => {
     fetchDashboardData();
     fetchActivities(1, false);
-  }, [fetchDashboardData, fetchActivities]);
+    fetchAttActivities(1, false);
+  }, [fetchDashboardData, fetchActivities, fetchAttActivities]);
 
   // ── Chart data ──────────────────────────────────────────────────
   const feeChartData = {
@@ -398,17 +433,24 @@ const AdminDashboard = () => {
             <div className="text-center py-8 text-gray-400"><p>No student data available</p></div>
           )}
         </div>
+      </div>
 
-        {/* Activity log with infinite scroll */}
+      {/* Two Activity Panels */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+        {/* Panel 1 — Fees, Payments, Students, Teachers */}
         <div className="bg-white rounded-xl shadow-sm p-5 flex flex-col">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Recent Activities</h3>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-lg font-semibold text-gray-900">Recent Activities</h3>
+            <span className="text-xs text-gray-400">Fees · Payments · Students · Teachers</span>
+          </div>
           <div className="flex-1 overflow-y-auto max-h-72 space-y-2 pr-1">
             {activities.length === 0 && !actLoading ? (
               <div className="text-center py-8 text-gray-400"><p>No activities yet</p></div>
             ) : (
               <>
                 {activities.map((activity, index) => {
-                  const config = ACTIVITY_CONFIG[activity.type] || ACTIVITY_CONFIG.admission;
+                  const config = ACTIVITY_CONFIG[activity.type] || ACTIVITY_CONFIG.fee;
                   return (
                     <div key={index}
                       className="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition cursor-pointer"
@@ -423,12 +465,45 @@ const AdminDashboard = () => {
                     </div>
                   );
                 })}
-                {/* Sentinel for infinite scroll */}
                 <div ref={activityRef} className="py-2 text-center">
                   {actLoading && <FaSpinner className="animate-spin text-blue-500 mx-auto" />}
-                  {!actHasMore && activities.length > 0 && (
-                    <p className="text-xs text-gray-400">All activities loaded</p>
-                  )}
+                  {!actHasMore && activities.length > 0 && <p className="text-xs text-gray-400">All loaded</p>}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Panel 2 — Attendance Log */}
+        <div className="bg-white rounded-xl shadow-sm p-5 flex flex-col">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-lg font-semibold text-gray-900">Attendance Log</h3>
+            <span className="text-xs text-gray-400">Approvals · Submissions · Holidays</span>
+          </div>
+          <div className="flex-1 overflow-y-auto max-h-72 space-y-2 pr-1">
+            {attActivities.length === 0 && !attLoading ? (
+              <div className="text-center py-8 text-gray-400"><p>No attendance activity yet</p></div>
+            ) : (
+              <>
+                {attActivities.map((activity, index) => {
+                  const config = ATTENDANCE_CONFIG[activity.type] || ATTENDANCE_CONFIG.approved;
+                  return (
+                    <div key={index}
+                      className="flex items-start p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition cursor-pointer"
+                      onClick={() => activity.link && navigate(activity.link)}>
+                      <div className={`p-2 rounded-lg mr-3 flex-shrink-0 ${config.color}`}>
+                        {config.icon}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-gray-900 leading-snug">{activity.action}</p>
+                        <p className="text-xs text-gray-500 mt-0.5">{activity.timeFormatted}</p>
+                      </div>
+                    </div>
+                  );
+                })}
+                <div ref={attActivityRef} className="py-2 text-center">
+                  {attLoading && <FaSpinner className="animate-spin text-blue-500 mx-auto" />}
+                  {!attHasMore && attActivities.length > 0 && <p className="text-xs text-gray-400">All loaded</p>}
                 </div>
               </>
             )}
