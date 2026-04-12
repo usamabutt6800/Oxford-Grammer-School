@@ -1065,7 +1065,7 @@ async function updateStudentAttendanceSummary(studentId) {
 // @access  Private (Admin)
 export const getAttendanceReport = asyncHandler(async (req, res) => {
   const { startDate, endDate, class: className, section } = req.query;
-  
+
   if (!startDate || !endDate || !className || !section) {
     return res.status(400).json({
       success: false,
@@ -1074,15 +1074,18 @@ export const getAttendanceReport = asyncHandler(async (req, res) => {
   }
 
   const start = new Date(startDate);
-  const end = new Date(endDate);
-  
-  // Validate date range
+  const end   = new Date(endDate);
+  start.setHours(0, 0, 0, 0);
+  end.setHours(23, 59, 59, 999);
+
   if (start > end) {
-    return res.status(400).json({
-      success: false,
-      error: 'Start date cannot be after end date'
-    });
+    return res.status(400).json({ success: false, error: 'Start date cannot be after end date' });
   }
+
+  // Cap end date at today — future dates cannot have attendance
+  const today = new Date();
+  today.setHours(23, 59, 59, 999);
+  const effectiveEnd = end > today ? today : end;
 
   // Get all students in the class
   const students = await Student.find({
@@ -1094,53 +1097,85 @@ export const getAttendanceReport = asyncHandler(async (req, res) => {
   .sort('rollNo')
   .lean();
 
+  // Get holidays in the period
+  const holidays = await Holiday.find({
+    date: { $gte: start, $lte: end }
+  }).select('date title type').lean();
+
+  // Get all dates in the period
+  const allDates = eachDayOfInterval({ start, end });
+
+  // Classify each date
+  const holidayDateStrings = new Set(
+    holidays.map(h => format(new Date(h.date), 'yyyy-MM-dd'))
+  );
+
+  const classifiedDates = allDates.map(date => {
+    const dateStr = format(date, 'yyyy-MM-dd');
+    const isFuture = date > today;
+    const isSundayDate = isSunday(date);
+    const holiday = holidays.find(h => format(new Date(h.date), 'yyyy-MM-dd') === dateStr);
+    return {
+      date,
+      dateStr,
+      isSunday: isSundayDate,
+      isHoliday: !!holiday,
+      holidayTitle: holiday?.title || null,
+      isFuture,
+      // A working day = not Sunday, not holiday, not future
+      isWorkingDay: !isSundayDate && !holiday && !isFuture,
+    };
+  });
+
+  const workingDays = classifiedDates.filter(d => d.isWorkingDay).length;
+
   // Get APPROVED attendance for the date range
   const attendance = await Attendance.find({
     class: className,
     section: section,
-    date: {
-      $gte: start,
-      $lte: end
-    },
+    date: { $gte: start, $lte: effectiveEnd },
     approvalStatus: 'Approved'
   })
   .select('student date status remarks')
   .lean();
 
-  // Get holidays in the period
-  const holidays = await Holiday.find({
-    date: {
-      $gte: start,
-      $lte: end
-    }
-  }).select('date title type').lean();
+  // Build lookup: studentId -> Map<dateStr, status>
+  const attendanceByStudent = {};
+  attendance.forEach(record => {
+    const sid = record.student.toString();
+    const dateStr = format(new Date(record.date), 'yyyy-MM-dd');
+    if (!attendanceByStudent[sid]) attendanceByStudent[sid] = {};
+    attendanceByStudent[sid][dateStr] = record.status;
+  });
 
-  // Get all dates in the period
-  const dates = eachDayOfInterval({ start, end });
-  
-  // Calculate working days (excluding Sundays and holidays)
-  const workingDays = dates.filter(date => {
-    if (isSunday(date)) return false;
-    const holiday = holidays.find(h => 
-      format(new Date(h.date), 'yyyy-MM-dd') === format(date, 'yyyy-MM-dd')
-    );
-    return !holiday;
-  }).length;
-
-  // Process each student's attendance
+  // Process each student
   const studentReports = students.map(student => {
-    const studentAttendance = attendance.filter(a => 
-      a.student.toString() === student._id.toString()
-    );
-    
-    const presentDays = studentAttendance.filter(a => a.status === 'Present').length;
-    const absentDays = studentAttendance.filter(a => a.status === 'Absent').length;
-    const leaveDays = studentAttendance.filter(a => a.status === 'Leave').length;
-    
-    // Calculate percentage based on working days (excluding leave days)
+    const sid = student._id.toString();
+    const studentAttendanceMap = attendanceByStudent[sid] || {};
+
+    let presentDays = 0, absentDays = 0, leaveDays = 0, notMarkedDays = 0;
+
+    // Build daily attendance array for the calendar grid
+    const dailyAttendance = classifiedDates.map(d => {
+      if (d.isSunday) return { dateStr: d.dateStr, status: 'SUNDAY' };
+      if (d.isHoliday) return { dateStr: d.dateStr, status: 'HOLIDAY', holidayTitle: d.holidayTitle };
+      if (d.isFuture) return { dateStr: d.dateStr, status: 'FUTURE' };
+
+      const status = studentAttendanceMap[d.dateStr];
+      if (!status) {
+        notMarkedDays++;
+        return { dateStr: d.dateStr, status: 'NM' };
+      }
+      if (status === 'Present') presentDays++;
+      else if (status === 'Absent') absentDays++;
+      else if (status === 'Leave') leaveDays++;
+      return { dateStr: d.dateStr, status };
+    });
+
+    // Percentage: Leave excluded from denominator (not penalised)
     const effectiveDays = workingDays - leaveDays;
-    const attendancePercentage = effectiveDays > 0 
-      ? ((presentDays / workingDays) * 100).toFixed(2) // Working days as base, not effective days
+    const attendancePercentage = effectiveDays > 0
+      ? ((presentDays / effectiveDays) * 100).toFixed(2)
       : 0;
 
     return {
@@ -1151,25 +1186,22 @@ export const getAttendanceReport = asyncHandler(async (req, res) => {
       presentDays,
       absentDays,
       leaveDays,
+      notMarkedDays,
       attendancePercentage: parseFloat(attendancePercentage),
-      status: attendancePercentage >= 75 ? 'Good' : 
-              attendancePercentage >= 60 ? 'Warning' : 'Critical'
+      status: attendancePercentage >= 75 ? 'Good' : attendancePercentage >= 60 ? 'Warning' : 'Critical',
+      dailyAttendance, // ← key addition: per-day P/A/L/NM/SUNDAY/HOLIDAY/FUTURE
     };
   });
 
-  // Calculate class summary
-  const totalPresent = studentReports.reduce((sum, student) => sum + student.presentDays, 0);
-  const totalAbsent = studentReports.reduce((sum, student) => sum + student.absentDays, 0);
-  const totalLeave = studentReports.reduce((sum, student) => sum + student.leaveDays, 0);
-  
+  const totalPresent = studentReports.reduce((s, st) => s + st.presentDays, 0);
+  const totalAbsent  = studentReports.reduce((s, st) => s + st.absentDays, 0);
+  const totalLeave   = studentReports.reduce((s, st) => s + st.leaveDays, 0);
+
   const classAttendancePercentage = workingDays > 0 && students.length > 0
     ? ((totalPresent / (workingDays * students.length)) * 100).toFixed(2)
     : 0;
 
-  // Get defaulters (attendance < 75%)
-  const defaulters = studentReports.filter(student => 
-    parseFloat(student.attendancePercentage) < 75
-  );
+  const defaulters = studentReports.filter(s => parseFloat(s.attendancePercentage) < 75);
 
   res.status(200).json({
     success: true,
@@ -1177,29 +1209,32 @@ export const getAttendanceReport = asyncHandler(async (req, res) => {
       reportPeriod: {
         startDate: start,
         endDate: end,
+        effectiveEndDate: effectiveEnd, // actual end used (capped at today)
         className,
         section,
-        totalDays: dates.length,
+        totalDays: allDates.length,
         workingDays,
         holidays: holidays.length,
-        sundays: dates.filter(date => isSunday(date)).length
+        sundays: allDates.filter(d => isSunday(d)).length,
+        futureDays: allDates.filter(d => d > today).length,
       },
       classSummary: {
         totalStudents: students.length,
         totalPresent,
         totalAbsent,
         totalLeave,
-        classAttendancePercentage: parseFloat(classAttendancePercentage)
+        classAttendancePercentage: parseFloat(classAttendancePercentage),
       },
+      classifiedDates, // all date metadata for report grid
       studentReports,
       defaulters,
       defaultersCount: defaulters.length,
       attendanceDistribution: {
-        good: studentReports.filter(s => s.status === 'Good').length,
-        warning: studentReports.filter(s => s.status === 'Warning').length,
-        critical: studentReports.filter(s => s.status === 'Critical').length
+        good:     studentReports.filter(s => s.status === 'Good').length,
+        warning:  studentReports.filter(s => s.status === 'Warning').length,
+        critical: studentReports.filter(s => s.status === 'Critical').length,
       },
-      holidays // Include holidays data for the report
+      holidays,
     }
   });
 });

@@ -130,24 +130,32 @@ const AdminStudents = () => {
 
   const fetchStats = async () => {
     try {
-      const response = await studentService.getStudentStats();
-      
-      if (response.success) {
-        const statsData = response.data.summary || {};
-        
-        const discountCount = students.filter(s => 
-          s.feeStructure?.discountType !== 'None' && 
-          s.feeStructure?.discountType !== undefined
-        ).length;
-        
-        setStats({
-          total: statsData.total || 0,
-          active: statsData.active || 0,
-          feePaid: 0,
-          feePending: 0,
-          onDiscount: discountCount
-        });
-      }
+      const [statsRes, feeStatsRes, allStudentsRes] = await Promise.all([
+        studentService.getStudentStats(),
+        // Fetch fee summary for collected/pending
+        import('../../services/api').then(m => m.default.get('/fees/stats/summary')).catch(() => null),
+        // Fetch all students (no pagination) just for discount count
+        studentService.getStudents({ limit: 1000, status: 'Active' }).catch(() => null),
+      ]);
+
+      const statsData = statsRes?.data?.summary || {};
+
+      // Fee stats
+      const feeData = feeStatsRes?.data?.data || {};
+
+      // Discount count from all students, not just current page
+      const allStudents = allStudentsRes?.data || [];
+      const discountCount = allStudents.filter(s =>
+        s.feeStructure?.discountType && s.feeStructure.discountType !== 'None'
+      ).length;
+
+      setStats({
+        total:      statsData.total  || 0,
+        active:     statsData.active || 0,
+        feePaid:    feeData.totalPaid || 0,
+        feePending: feeData.totalDue  || 0,
+        onDiscount: discountCount,
+      });
     } catch (error) {
       console.error('Failed to fetch stats:', error);
     }
@@ -516,7 +524,9 @@ const AdminStudents = () => {
           <div className="text-sm text-gray-600">Fee Collected</div>
         </div>
         <div className="card text-center">
-          <div className="text-2xl font-bold text-red-600">{stats.feePending}</div>
+          <div className="text-2xl font-bold text-red-600">
+            PKR {(stats.feePending || 0).toLocaleString()}
+          </div>
           <div className="text-sm text-gray-600">Fee Pending</div>
         </div>
         <div className="card text-center">
@@ -669,15 +679,29 @@ const AdminStudents = () => {
                         </div>
                       </td>
                       <td className="px-4 py-3">
-                        <div className="flex items-center text-gray-800 font-medium">
-                          <FaMoneyBillWave className="mr-1 text-green-600" />
-                          <span>PKR {student.feeStructure?.netFee?.toLocaleString() || '0'}</span>
-                        </div>
-                        {student.feeStructure?.discountType !== 'None' && (
-                          <div className="text-xs text-green-600">
-                            {student.feeStructure?.discountType} ({student.feeStructure?.discountPercentage}%)
-                          </div>
-                        )}
+                        {(() => {
+                          // Always compute fee from live FeeStructure data
+                          // so it reflects correctly after a class change
+                          const baseFee = classFees[student.currentClass] || 0;
+                          const discountPct = student.feeStructure?.discountPercentage || 0;
+                          const discountType = student.feeStructure?.discountType || 'None';
+                          const netFee = discountPct > 0
+                            ? Math.round(baseFee - (baseFee * discountPct / 100))
+                            : baseFee;
+                          return (
+                            <>
+                              <div className="flex items-center text-gray-800 font-medium">
+                                <FaMoneyBillWave className="mr-1 text-green-600" />
+                                <span>PKR {netFee.toLocaleString()}</span>
+                              </div>
+                              {discountType !== 'None' && discountPct > 0 && (
+                                <div className="text-xs text-green-600">
+                                  {discountType} ({discountPct}% off)
+                                </div>
+                              )}
+                            </>
+                          );
+                        })()}
                       </td>
                       <td className="px-4 py-3">
                         <span className={`px-3 py-1 rounded-full text-sm font-medium ${

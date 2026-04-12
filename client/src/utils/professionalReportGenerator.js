@@ -13,10 +13,19 @@ export const generateDetailedReport = (reportData) => {
     holidays = []
   } = reportData;
 
-  // Helper functions
+  // Helper: format date as DD/MM
   const formatDateDM = (date) => {
     const d = new Date(date);
     return `${d.getDate()}/${d.getMonth() + 1}`;
+  };
+
+  // Helper: format date as yyyy-MM-dd string
+  const format = (date) => {
+    const d = new Date(date);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
   };
 
   const getDayName = (date) => {
@@ -33,35 +42,37 @@ export const generateDetailedReport = (reportData) => {
     return Math.floor((target.getDate() + firstDayOfWeek - 1) / 7) + 1;
   };
 
-  // Function to get attendance status for a specific date
+  // Get attendance status for a specific date from the student's dailyAttendance array
   const getAttendanceStatus = (student, date, holidays) => {
-    const dateStr = date.toISOString().split('T')[0];
-    
-    // Check if it's Sunday
-    if (date.getDay() === 0) {
-      return { status: '-', isSunday: true };
+    const dateStr = format(date, 'yyyy-MM-dd');
+
+    // Use real daily attendance data from backend if available
+    if (student.dailyAttendance && student.dailyAttendance.length > 0) {
+      const record = student.dailyAttendance.find(d => d.dateStr === dateStr);
+      if (record) {
+        if (record.status === 'SUNDAY')  return { status: '-',  isSunday: true };
+        if (record.status === 'HOLIDAY') return { status: 'H',  isHoliday: true, title: record.holidayTitle };
+        if (record.status === 'FUTURE')  return { status: '-',  isFuture: true };
+        if (record.status === 'Present') return { status: 'P',  isPresent: true };
+        if (record.status === 'Absent')  return { status: 'A',  isAbsent: true };
+        if (record.status === 'Leave')   return { status: 'L',  isLeave: true };
+        if (record.status === 'NM')      return { status: 'NM', isNotMarked: true };
+      }
     }
-    
-    // Check if it's a holiday
+
+    // Fallback logic if dailyAttendance not available
+    if (date.getDay() === 0) return { status: '-', isSunday: true };
+
     const holiday = holidays.find(h => {
-      const holidayDate = new Date(h.date);
-      return holidayDate.toDateString() === date.toDateString();
+      const hDate = new Date(h.date);
+      return hDate.toDateString() === date.toDateString();
     });
-    
-    if (holiday) {
-      return { status: holiday.title.substring(0, 10), isHoliday: true };
-    }
-    
-    // Check if it's a future date
+    if (holiday) return { status: 'H', isHoliday: true };
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    if (date > today) {
-      return { status: '-', isFuture: true };
-    }
-    
-    // TODO: Get actual attendance from student data
-    // This needs to be implemented based on your data structure
-    // For now, returning 'NM' for Not Marked
+    if (date > today) return { status: '-', isFuture: true };
+
     return { status: 'NM', isNotMarked: true };
   };
 
@@ -207,14 +218,18 @@ export const generateDetailedReport = (reportData) => {
                     } else if (attendance.isHoliday) {
                       cellClass = 'holiday';
                       symbol = 'H';
-                    } else if (symbol === 'P') {
+                    } else if (symbol === 'P' || attendance.isPresent) {
                       cellClass = 'present';
-                    } else if (symbol === 'A') {
+                      symbol = 'P';
+                    } else if (symbol === 'A' || attendance.isAbsent) {
                       cellClass = 'absent';
-                    } else if (symbol === 'L') {
+                      symbol = 'A';
+                    } else if (symbol === 'L' || attendance.isLeave) {
                       cellClass = 'leave';
-                    } else if (symbol === 'NM') {
+                      symbol = 'L';
+                    } else if (symbol === 'NM' || attendance.isNotMarked) {
                       cellClass = 'not-marked';
+                      symbol = 'NM';
                     }
                     
                     return `
@@ -261,12 +276,16 @@ export const generateDetailedReport = (reportData) => {
               <div class="text-sm text-gray-600">Leave</div>
             </div>
           </div>
+          ${(student.notMarkedDays || 0) > 0 ? `
+          <div style="text-align:center;margin-top:8px;font-size:12px;color:#6b7280;">
+            Not Marked: ${student.notMarkedDays} day(s) — treated as absent in records
+          </div>` : ''}
           <div class="percentage-box">
             <div class="text-3xl font-bold text-purple-600">${student.attendancePercentage || 0}%</div>
             <div class="text-sm text-gray-600">Attendance Percentage</div>
           </div>
           <p class="percentage-note">
-            * Percentage calculated for working days only (excluding Sundays and holidays). Leave days not counted as absent.
+            * Percentage = Present ÷ (Working Days − Leave Days) × 100. Leave days are not penalised. Sundays, holidays and future dates excluded from working days.
           </p>
         </div>
 
