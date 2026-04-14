@@ -281,28 +281,20 @@ const FeesGenerator = () => {
     const feesToSave = [];
     
     for (const [studentId, feeData] of Object.entries(studentFees)) {
-      // Calculate net amount after discount
-      const netAmount = feeData.netFee || feeData.tuitionFee;
-      
+      const additionalTotal = feeData.additionalCharges.reduce((sum, c) => sum + (c.amount || 0), 0);
+
+      // feeItems contains ONLY positive charges — no discount line item here.
+      // The discount is stored separately in fee.discount and applied via netAmount.
+      // Adding it to feeItems AND fee.discount was causing double deduction.
       const feeItems = [
-        { 
-          itemName: 'Tuition Fee', 
-          amount: feeData.tuitionFee, 
-          isRecurring: true 
+        {
+          itemName: 'Tuition Fee',
+          amount: feeData.tuitionFee,
+          isRecurring: true,
         }
       ];
-      
-      // Add discount as a separate line item if applicable
-      if (feeData.discountAmount > 0) {
-        feeItems.push({
-          itemName: `Discount (${feeData.discountType} - ${feeData.discountPercentage}%)`,
-          amount: -feeData.discountAmount,
-          isRecurring: false,
-          description: `${feeData.discountType} discount applied`
-        });
-      }
-      
-      // Add additional charges that have name and amount
+
+      // Additional charges (exam fee, canteen, etc.)
       feeData.additionalCharges.forEach(charge => {
         if (charge.name && charge.name.trim() !== '' && charge.amount > 0) {
           feeItems.push({
@@ -314,18 +306,29 @@ const FeesGenerator = () => {
           });
         }
       });
-      
+
+      // totalAmount = sum of all positive fee items (before discount)
+      const totalAmount = feeData.tuitionFee + additionalTotal;
+
+      // netAmount = totalAmount minus discount
+      const discountAmount = feeData.discountAmount || 0;
+      const netAmount = totalAmount - discountAmount;
+
       feesToSave.push({
-        student: studentId,
-        academicYear: feeData.academicYear,
-        month: feeData.month,
-        feeItems: feeItems,
-        totalAmount: feeData.tuitionFee + feeData.additionalCharges.reduce((sum, c) => sum + c.amount, 0),
-        discount: feeData.discountAmount,
-        netAmount: netAmount + feeData.additionalCharges.reduce((sum, c) => sum + c.amount, 0),
-        paidAmount: 0,
-        dueDate: feeData.dueDate,
-        status: 'Pending'
+        student:          studentId,
+        studentName:      feeData.studentName,
+        admissionNo:      feeData.admissionNo,
+        studentClass:     selectedClass,
+        studentSection:   selectedSection,
+        academicYear:     feeData.academicYear,
+        month:            feeData.month,
+        feeItems,
+        totalAmount,
+        discount:         discountAmount,
+        netAmount,
+        paidAmount:       0,
+        dueDate:          feeData.dueDate,
+        status:           'Pending',
       });
     }
     

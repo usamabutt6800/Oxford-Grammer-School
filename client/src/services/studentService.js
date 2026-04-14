@@ -18,6 +18,7 @@ export const studentService = {
       const response = await api.get(`/students/${id}`);
       return response.data;
     } catch (error) {
+      console.error('Error in getStudent:', error);
       throw error;
     }
   },
@@ -39,6 +40,7 @@ export const studentService = {
       const response = await api.put(`/students/${id}`, studentData);
       return response.data;
     } catch (error) {
+      console.error('Error in updateStudent:', error.response?.data || error);
       throw error;
     }
   },
@@ -49,6 +51,7 @@ export const studentService = {
       const response = await api.delete(`/students/${id}`);
       return response.data;
     } catch (error) {
+      console.error('Error in deleteStudent:', error);
       throw error;
     }
   },
@@ -59,6 +62,7 @@ export const studentService = {
       const response = await api.get('/students/stats/summary');
       return response.data;
     } catch (error) {
+      console.error('Error in getStudentStats:', error);
       throw error;
     }
   }

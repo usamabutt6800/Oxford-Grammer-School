@@ -135,7 +135,7 @@ const studentSchema = new mongoose.Schema({
   feeStructure: {
     tuitionFee: {
       type: Number,
-      required: true,
+      required: false, // CHANGED: false to allow partial updates
       default: 5000
     },
     admissionFee: Number,
@@ -195,8 +195,6 @@ const studentSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// ... rest of the model remains the same ...
-
 // Virtual for full name
 studentSchema.virtual('fullName').get(function() {
   return `${this.firstName} ${this.lastName || ''}`.trim();
@@ -239,6 +237,24 @@ studentSchema.pre('save', function(next) {
     fee.netFee = total - (total * discount / 100);
   }
   next();
+});
+
+// Pre-findOneAndUpdate middleware to handle updates properly
+studentSchema.pre('findOneAndUpdate', function(next) {
+  const update = this.getUpdate();
+  
+  // If feeStructure is being updated but tuitionFee is missing, preserve the existing value
+  if (update.feeStructure && update.feeStructure.tuitionFee === undefined) {
+    // We need to get the current document to preserve tuitionFee
+    this.model.findOne(this.getQuery()).then(doc => {
+      if (doc && doc.feeStructure && doc.feeStructure.tuitionFee !== undefined) {
+        update.feeStructure.tuitionFee = doc.feeStructure.tuitionFee;
+      }
+      next();
+    }).catch(next);
+  } else {
+    next();
+  }
 });
 
 // Method to promote student

@@ -208,11 +208,11 @@ export const siblingPayment = asyncHandler(async (req, res) => {
     dueAmount: { $gt: 0 },
   }).populate('student', 'firstName lastName admissionNo currentClass section fatherName').lean();
 
-  // Sort fees: highest class first, then by due amount
+  // Sort fees: lowest class first (youngest student paid first), then by due amount
   fees.sort((a, b) => {
     const rankA = getClassRank(a.student?.currentClass || '');
     const rankB = getClassRank(b.student?.currentClass || '');
-    if (rankB !== rankA) return rankB - rankA;
+    if (rankA !== rankB) return rankA - rankB;
     return b.dueAmount - a.dueAmount;
   });
 

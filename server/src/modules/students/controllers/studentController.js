@@ -113,9 +113,6 @@ export const getStudent = asyncHandler(async (req, res) => {
 // @desc    Get all distinct classes
 // @route   GET /api/v1/students/classes
 // @access  Private (Admin/Teacher)
-// @desc    Get all distinct classes in order
-// @route   GET /api/v1/students/classes
-// @access  Private
 export const getClasses = asyncHandler(async (req, res) => {
   const classes = await Student.distinct('currentClass');
   
@@ -134,7 +131,7 @@ export const getClasses = asyncHandler(async (req, res) => {
     if (className === '8') return 10;
     if (className === '9') return 11;
     if (className === '10') return 12;
-    return 99; // Unknown classes go to end
+    return 99;
   };
   
   const sortedClasses = classes.sort((a, b) => classOrder(a) - classOrder(b));
@@ -202,10 +199,10 @@ export const createStudent = asyncHandler(async (req, res) => {
     admissionDate: req.body.admissionDate || new Date(),
     
     // Fee Structure
-    feeStructure: req.body.feeStructure || {
-      tuitionFee: req.body.tuitionFee || 0,
-      discountType: req.body.discountType || 'None',
-      discountPercentage: req.body.discountPercentage || 0
+    feeStructure: {
+      tuitionFee: req.body.feeStructure?.tuitionFee || classFees?.[req.body.currentClass] || 0,
+      discountType: req.body.feeStructure?.discountType || 'None',
+      discountPercentage: req.body.feeStructure?.discountPercentage || 0
     },
     
     // Status
@@ -257,6 +254,38 @@ export const updateStudent = asyncHandler(async (req, res) => {
     });
   }
   
+  // Prepare update data - start with a clean object
+  const updateData = {};
+  
+  // Copy only allowed fields
+  const allowedFields = [
+    'firstName', 'lastName', 'fatherName', 'motherName',
+    'dateOfBirth', 'gender', 'currentClass', 'section',
+    'phone', 'fatherPhone', 'motherPhone', 'emergencyPhone',
+    'email', 'status', 'admissionDate', 'remarks', 'address'
+  ];
+  
+  allowedFields.forEach(field => {
+    if (req.body[field] !== undefined) {
+      updateData[field] = req.body[field];
+    }
+  });
+  
+  // Handle feeStructure separately - ensure tuitionFee is included
+  if (req.body.feeStructure) {
+    updateData.feeStructure = {
+      tuitionFee: req.body.feeStructure.tuitionFee !== undefined 
+        ? req.body.feeStructure.tuitionFee 
+        : student.feeStructure?.tuitionFee || 0,
+      discountType: req.body.feeStructure.discountType !== undefined
+        ? req.body.feeStructure.discountType
+        : student.feeStructure?.discountType || 'None',
+      discountPercentage: req.body.feeStructure.discountPercentage !== undefined
+        ? req.body.feeStructure.discountPercentage
+        : student.feeStructure?.discountPercentage || 0
+    };
+  }
+  
   // Update roll number if class or section changes
   if (req.body.currentClass || req.body.section) {
     const newClass = req.body.currentClass || student.currentClass;
@@ -265,16 +294,32 @@ export const updateStudent = asyncHandler(async (req, res) => {
     if (newClass !== student.currentClass || newSection !== student.section) {
       const classCount = await Student.countDocuments({
         currentClass: newClass,
-        section: newSection
+        section: newSection,
+        _id: { $ne: req.params.id }
       });
-      req.body.rollNo = `${newClass}-${newSection}-${String(classCount + 1).padStart(2, '0')}`;
+      updateData.rollNo = `${newClass}-${newSection}-${String(classCount + 1).padStart(2, '0')}`;
     }
   }
   
+  // Add updatedBy
+  updateData.updatedBy = req.user.id;
+  
+  // Remove any fields that shouldn't be updated
+  delete updateData._id;
+  delete updateData.__v;
+  delete updateData.createdBy;
+  delete updateData.createdAt;
+  delete updateData.admissionNo;
+  
+  // Perform update with runValidators: true to ensure validation passes
   student = await Student.findByIdAndUpdate(
     req.params.id,
-    { ...req.body, updatedBy: req.user.id },
-    { new: true, runValidators: true }
+    updateData,
+    { 
+      new: true, 
+      runValidators: true,
+      context: 'query'
+    }
   );
   
   res.status(200).json({

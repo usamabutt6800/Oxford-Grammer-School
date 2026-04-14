@@ -264,43 +264,65 @@ const AdminStudents = () => {
   const handleUpdateStudent = async (e) => {
   e.preventDefault();
   if (!selectedStudent) return;
-  
+
   try {
-    // Prepare the student data with properly structured address
+    // Get the current class fee from classFees state
+    const currentClassFee = classFees[selectedStudent.currentClass] || 0;
+    
+    // Calculate discount percentage based on discount type
+    let discountPercentage = selectedStudent.feeStructure?.discountPercentage || 0;
+    if (selectedStudent.feeStructure?.discountType === 'Orphan') {
+      discountPercentage = 50;
+    } else if (selectedStudent.feeStructure?.discountType === 'Sibling') {
+      discountPercentage = 20;
+    }
+    
+    // Prepare update data with ALL required fields
     const updateData = {
-      ...selectedStudent,
-      // Ensure address is properly structured
-      address: selectedStudent.address || {
-        street: selectedStudent.street || '',
-        city: selectedStudent.city || '',
-        state: selectedStudent.state || '',
-        postalCode: selectedStudent.postalCode || '',
-        country: selectedStudent.country || 'Pakistan'
+      firstName: selectedStudent.firstName,
+      lastName: selectedStudent.lastName || '',
+      fatherName: selectedStudent.fatherName,
+      motherName: selectedStudent.motherName || '',
+      dateOfBirth: selectedStudent.dateOfBirth,
+      gender: selectedStudent.gender,
+      currentClass: selectedStudent.currentClass,
+      section: selectedStudent.section,
+      phone: selectedStudent.phone || '',
+      fatherPhone: selectedStudent.fatherPhone || '',
+      motherPhone: selectedStudent.motherPhone || '',
+      emergencyPhone: selectedStudent.emergencyPhone || '',
+      email: selectedStudent.email || '',
+      status: selectedStudent.status,
+      admissionDate: selectedStudent.admissionDate,
+      address: {
+        street: selectedStudent.address?.street || '',
+        city: selectedStudent.address?.city || '',
+        state: selectedStudent.address?.state || '',
+        postalCode: selectedStudent.address?.postalCode || '',
+        country: selectedStudent.address?.country || 'Pakistan',
       },
-      // Remove any flat address fields if they exist
-      street: undefined,
-      city: undefined,
-      state: undefined,
-      postalCode: undefined,
-      country: undefined
+      // IMPORTANT: Include full feeStructure with tuitionFee
+      feeStructure: {
+        tuitionFee: currentClassFee,  // Use the fee from classFees
+        discountType: selectedStudent.feeStructure?.discountType || 'None',
+        discountPercentage: discountPercentage
+      },
+      remarks: selectedStudent.remarks || '',
     };
-    
-    // Clean up undefined fields
-    Object.keys(updateData).forEach(key => {
-      if (updateData[key] === undefined) {
-        delete updateData[key];
-      }
-    });
-    
+
+    console.log('Updating student with data:', updateData); // For debugging
+
     const response = await studentService.updateStudent(selectedStudent._id, updateData);
     if (response.success) {
       toast.success('Student updated successfully!');
       setShowEditModal(false);
       fetchStudents();
+      fetchStats();
     } else {
       toast.error(response.error || 'Failed to update student');
     }
   } catch (error) {
+    console.error('Update error:', error);
     toast.error(error.response?.data?.error || 'Failed to update student');
   }
 };

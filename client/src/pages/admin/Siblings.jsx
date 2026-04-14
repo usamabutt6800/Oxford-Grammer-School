@@ -37,7 +37,7 @@ const PaymentModal = ({ group, month, academicYear, onClose, onSuccess, api }) =
   // Build preview of how payment will be distributed
   useEffect(() => {
     if (!amount || amount <= 0) { setPreview(null); return; }
-    // Replicate backend logic: highest class first
+    // Replicate backend logic: lowest class first (youngest student paid first)
     const classOrder = ['Play Group','Nursery','Prep','1','2','3','4','5','6','7','8','9','10'];
     const rank = (cls) => { const i = classOrder.indexOf(cls); return i === -1 ? 99 : i; };
 
@@ -49,7 +49,7 @@ const PaymentModal = ({ group, month, academicYear, onClose, onSuccess, api }) =
         fees.push({ studentName: `${student.firstName} ${student.lastName || ''}`.trim(), class: student.currentClass, dueAmount: f.dueAmount, feeId: f._id });
       });
     });
-    fees.sort((a, b) => rank(b.class) - rank(a.class));
+    fees.sort((a, b) => rank(a.class) - rank(b.class));
 
     let rem = parseFloat(amount);
     const dist = fees.map(f => {
